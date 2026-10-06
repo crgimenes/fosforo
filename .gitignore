@@ -1,0 +1,24 @@
+# Planning documents stay local (Portuguese, not published)
+project.md
+TODO.md
+CLAUDE.md
+
+# Xcode / Swift
+build/
+DerivedData/
+.build/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+
+# C objects
+*.o
+*.a
+*.dSYM/
+
+.DS_Store
+
+# built by make xcframework
+swift/Frameworks/
+.claude/

@@ -26,7 +26,7 @@ final class Server {
       at: dir.appendingPathComponent("user.pub"), to: dir.appendingPathComponent("authorized_keys"))
     userKey = try String(contentsOf: dir.appendingPathComponent("user"), encoding: .utf8)
     knownHosts = KnownHosts(path: dir.appendingPathComponent("known_hosts").path)
-    port = Int.random(in: 30000...60000)
+    port = Int.random(in: 30000...49151)  // below the ephemeral range
     let config = """
       ListenAddress 127.0.0.1
       Port \(port)
@@ -771,17 +771,19 @@ private func infoRequest(_ prompts: [(String, Bool)]) -> [UInt8] {
   #expect(throws: SSHError.self) { try vault.open(String(bytes)) }
 }
 
-/// A port nothing listens on now, as the system picks one: tests run side
-/// by side, and a random one may be another test's.
+/// A port nothing listens on now, below the ephemeral range (49152 up): one
+/// the system hands out could go to the next outgoing connection, the
+/// client's own to sshd among them, before the test binds it. Tried by
+/// binding, since tests run side by side.
 private func freePort() -> Int {
-  guard let fd = try? listenTCP(host: "127.0.0.1", port: 0) else { return 0 }
-  defer { close(fd) }
-  var addr = sockaddr_in()
-  var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-  _ = withUnsafeMutablePointer(to: &addr) {
-    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
+  for _ in 0..<100 {
+    let port = Int.random(in: 20000...29999)
+    if let fd = try? listenTCP(host: "127.0.0.1", port: port) {
+      close(fd)
+      return port
+    }
   }
-  return Int(UInt16(bigEndian: addr.sin_port))
+  return 0
 }
 
 @Test func forwardSpecsReadAsSshTakesThem() {

@@ -27,7 +27,7 @@ final class Server {
       at: dir.appendingPathComponent("user.pub"), to: dir.appendingPathComponent("authorized_keys"))
     userKey = try String(contentsOf: dir.appendingPathComponent("user"), encoding: .utf8)
     knownHosts = KnownHosts(path: dir.appendingPathComponent("known_hosts").path)
-    port = Int.random(in: 30000...60000)
+    port = Int.random(in: 30000...49151)  // below the ephemeral range
     let config = """
       ListenAddress 127.0.0.1
       Port \(port)
@@ -1210,15 +1210,15 @@ func moshPredictsTypingButNotPasswords() throws {
   let ssh = try sshDir(dir)
   let work = try keygen(ssh.appendingPathComponent("trabalho"), ["-t", "ed25519"])
   try authorize(server, [work])
-  let free = {  // a port the system says nothing uses now
-    let fd = try listenTCP(host: "127.0.0.1", port: 0)
-    defer { close(fd) }
-    var addr = sockaddr_in()
-    var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-    _ = withUnsafeMutablePointer(to: &addr) {
-      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
+  let free = {  // nothing on it now, and below the ephemeral range (49152 up)
+    for _ in 0..<100 {
+      let port = Int.random(in: 20000...29999)
+      if let fd = try? listenTCP(host: "127.0.0.1", port: port) {
+        close(fd)
+        return port
+      }
     }
-    return Int(UInt16(bigEndian: addr.sin_port))
+    throw SSHError.io("no free port")
   }
   let p1 = try free()
   let p2 = try free()

@@ -70,10 +70,11 @@ jobs:
       - run: brew install mosh
       - run: make -C fosforo swift-fmt swift-build swift-test
 
-  # The C lint, with LLVM's own tools.
+  # The C lint, with LLVM's own tools, on the headers it is written for: the
+  # pty is a Mac's (openpty from util.h).
   lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: macos-26
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,9 +87,5 @@ jobs:
         with:
           repository: crgimenes/filo-term
           path: filo-term
-      - name: Install tools
-        run: |
-          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
-          sudo bash llvm.sh 23
-          sudo apt-get install -y clang-format-23 clang-tidy-23 cppcheck
-      - run: make -C fosforo fmt-check tidy check LLVM=/usr/lib/llvm-23/bin
+      - run: brew install llvm cppcheck
+      - run: make -C fosforo fmt-check tidy check LLVM="$(brew --prefix llvm)/bin"

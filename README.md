@@ -2,10 +2,11 @@
 
 A terminal emulator for macOS, iPadOS and iOS. MIT.
 
-On the Mac it is a terminal and nothing else: your login shell on a pty,
-the system's ssh and git. On the iPad and iPhone the shell is `rocchetto`, built
-in, with the app's own SSH and Mosh clients behind the `ssh` and `mosh`
-commands. The same C core and Metal renderer draw both.
+On the Mac it is a terminal and nothing else: your login shell on a pty, the
+system's ssh and git. On the iPad and iPhone the shell is
+[rocchetto](https://github.com/crgimenes/rocchetto), built in, with the
+app's own SSH and Mosh clients behind the `ssh` and `mosh` commands. The
+same C core and Metal renderer draw both.
 
 ## Layout
 
@@ -15,14 +16,16 @@ commands. The same C core and Metal renderer draw both.
 - `glyph/` — box drawing, blocks, shades, braille and Powerline glyphs drawn
   from geometry, so ANSI art has no seams between cells.
 - `pty/` — spawning the shell on a pseudo-terminal (macOS).
-- `config/` — the Filo configuration engine (`init.filo`, themes, hooks).
+- `config/` — the [Filo](https://github.com/crgimenes/clang_filo) configuration engine (`init.filo`, themes, hooks).
 - `rochost/` — the host that runs `rocchetto` in-process on iOS.
 - `swift/` — SwiftPM: `FosforoCore` (session, viewport, status bar, search),
   `FosforoRender` (glyph atlas, Metal, config), `FosforoSSH`, `FosforoMosh`,
   and the two apps, `fosforo` (AppKit) and `fosforo-ios` (UIKit).
 
-Needs `../filo-term` (UTF-8 decoder) and `../clang_filo` (Filo) beside this
-repository; the iOS build also needs `../rocchetto`.
+Needs [filo-term](https://github.com/crgimenes/filo-term) (UTF-8 decoder)
+and [clang_filo](https://github.com/crgimenes/clang_filo) (Filo) beside this
+repository, as `../filo-term` and `../clang_filo`; the iOS build also needs
+`../rocchetto`.
 
 ## Build
 

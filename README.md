@@ -60,6 +60,23 @@ handler.
 (set on-focus (fn (arg) (theme "default")))
 ```
 
+## Fonts and icons
+
+The default font is IBM 3270, shipped with the app. Box drawing, blocks,
+shades, braille and the Powerline separators are drawn from geometry, not
+taken from the font. Whatever the font lacks comes from the system's
+fallback: Japanese and Chinese from Hiragino and PingFang, emoji in color.
+
+Icons from Nerd Fonts, as drawn by lazy.nvim, lualine, starship and the
+like, are the exception. They live in the Unicode private-use area, which
+no system font covers and which the system's fallback skips, so they show
+as a box with a question mark. Install the symbols-only font and fosforo
+takes them from there, under any configured font:
+
+```sh
+brew install --cask font-symbols-only-nerd-font
+```
+
 ## The window
 
 Several sessions per window, one shown at a time: ⌘T new (in the directory

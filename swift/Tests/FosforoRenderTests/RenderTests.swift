@@ -329,6 +329,32 @@ func frameCPUCost() throws {
   #expect(f.all(row: 1, cols: 2, 6, 0x000000))
 }
 
+/// Without the font every private-use rune is the same LastResort box.
+@Test(
+  .enabled(
+    if: CTFontCopyPostScriptName(CTFontCreateWithName("SymbolsNFM" as CFString, 12, nil))
+      as String == "SymbolsNFM"))
+func nerdFontIconsComeFromTheSymbolsFont() throws {
+  let bolt = try Frame("\u{1b}[37m\u{F0E7}")
+  let folder = try Frame("\u{1b}[37m\u{F07B}")
+  #expect(bolt.px != folder.px)
+}
+
+/// An icon followed by a space spreads into it; followed by text, it keeps
+/// to its own cell. Powerline separators never spread.
+@Test func iconsTakeTheSpaceAfterThem() throws {
+  let spread = try Frame("\u{1b}[37m\u{F0E7} ")
+  #expect(!spread.all(row: 0, cols: 1, 2, 0x000000))
+  let kept = try Frame("\u{1b}[37m\u{F0E7}x")
+  let x = try Frame("\u{1b}[37m x")
+  for y in 0..<kept.metrics.height {
+    for c in kept.metrics.width..<(2 * kept.metrics.width) {
+      #expect(kept.rgb(c, y) == x.rgb(c, y))
+    }
+  }
+  #expect(try Frame("\u{1b}[37m\u{E0B0} ").all(row: 0, cols: 1, 2, 0x000000))
+}
+
 @Test func emojiKeepsItsColors() throws {
   let f = try Frame("\u{1b}[37m\u{1F600}")
   var colored = 0

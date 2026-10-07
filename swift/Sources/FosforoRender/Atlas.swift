@@ -98,7 +98,12 @@ final class Atlas {
     if let have = facesCache[key] {
       return have
     }
-    let scaled = CTFontCreateCopyWithAttributes(font, CTFontGetSize(font) * scale, nil, nil)
+    // The system fallback never looks at user fonts for U+E000-F8FF, where
+    // most Nerd Font icons live; without the font the cascade is unchanged.
+    let cascade = [CTFontDescriptorCreateWithNameAndSize("SymbolsNFM" as CFString, 0)]
+    let symbols = CTFontDescriptorCreateWithAttributes(
+      [kCTFontCascadeListAttribute: cascade] as CFDictionary)
+    let scaled = CTFontCreateCopyWithAttributes(font, CTFontGetSize(font) * scale, nil, symbols)
     let made = [
       scaled,
       variant(scaled, .traitBold),
@@ -249,14 +254,31 @@ final class Atlas {
     }
   }
 
+  /// A Nerd Font icon: the private-use area less the Powerline glyphs,
+  /// which are made to meet their neighbours.
+  static func isIcon(_ cp: UInt32) -> Bool {
+    (cp >= 0xE000 && cp <= 0xF8FF || cp >= 0xF0000) && !(cp >= 0xE0A0 && cp <= 0xE0D7)
+  }
+
   private func rasterize(_ cp: UInt32, font: CTFont, width: Int, height: Int) {
     for i in 0..<(width * height) {
       scratch[i] = 0
     }
-    guard let (face, glyph) = face(for: cp, font: font) else {
+    guard var (face, glyph) = face(for: cp, font: font) else {
       return
     }
     var glyphs = [glyph]
+    var position = CGPoint(x: 0, y: CGFloat(metrics.descent))
+    let ink = CTFontGetBoundingRectsForGlyphs(face, .horizontal, &glyph, nil, 1)
+    if width > metrics.width && Atlas.isIcon(cp) && ink.width > 0 && ink.height > 0 {
+      // the icon spreads over both cells, centred, keeping its proportions
+      // and clear of the neighbours and of the lines above and below
+      let k = min(0.9 * CGFloat(width) / ink.width, 0.7 * CGFloat(height) / ink.height)
+      face = CTFontCreateCopyWithAttributes(face, CTFontGetSize(face) * k, nil, nil)
+      position = CGPoint(
+        x: (CGFloat(width) - ink.width * k) / 2 - ink.minX * k,
+        y: (CGFloat(height) - ink.height * k) / 2 - ink.minY * k)
+    }
     scratch.withUnsafeMutableBytes { raw in
       guard
         let ctx = CGContext(
@@ -269,7 +291,6 @@ final class Atlas {
       ctx.setAllowsFontSmoothing(false)
       ctx.setShouldAntialias(true)
       ctx.setFillColor(gray: 1, alpha: 1)
-      var position = CGPoint(x: 0, y: CGFloat(metrics.descent))
       CTFontDrawGlyphs(face, &glyphs, &position, 1, ctx)
     }
   }

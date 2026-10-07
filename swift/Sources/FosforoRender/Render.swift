@@ -262,7 +262,16 @@ public final class Renderer {
     return out
   }
 
-  private func instance(_ cell: vt_cell, row: Int, col: Int, colors: [UInt32]) -> CellInstance {
+  /// Unicode gives Nerd Font icons width 1, and the programs that print one
+  /// follow it with a space for the icon to spread into.
+  static func iconWithRoom(_ cell: vt_cell, _ next: vt_cell) -> Bool {
+    Atlas.isIcon(cell.cp) && UInt32(cell.flags) & UInt32(VT_CELL_WIDE) == 0
+      && (next.cp == 0 || next.cp == 0x20) && next.bg == cell.bg && next.attr == cell.attr
+  }
+
+  private func instance(
+    _ cell: vt_cell, row: Int, col: Int, colors: [UInt32], stretch: Bool = false
+  ) -> CellInstance {
     let attr = UInt32(cell.attr)
     let bold = attr & UInt32(VT_ATTR_BOLD) != 0
     var fgColor = cell.fg
@@ -285,7 +294,7 @@ public final class Renderer {
     }
     let italic = attr & UInt32(VT_ATTR_ITALIC) != 0
     let style = Style(rawValue: (bold ? 1 : 0) | (italic ? 2 : 0)) ?? .regular
-    let wide = UInt32(cell.flags) & UInt32(VT_CELL_WIDE) != 0
+    let wide = stretch || UInt32(cell.flags) & UInt32(VT_CELL_WIDE) != 0
     var flags = (attr & UInt32(VT_ATTR_UL_MASK)) >> UInt32(VT_ATTR_UL_SHIFT)
     if flags == 0 && cell.link != 0 {
       // a hyperlink shows it is one, and which one the pointer is on
@@ -327,12 +336,16 @@ public final class Renderer {
     for r in 0..<screen.rows {
       let hits = byRow[r].sorted { $0.start < $1.start }
       var hi = 0
+      var covered = false
       for c in 0..<screen.cols {
         let cell = screen.cell(r, c)
-        if UInt32(cell.flags) & UInt32(VT_CELL_WIDE_TAIL) != 0 {
+        if covered || UInt32(cell.flags) & UInt32(VT_CELL_WIDE_TAIL) != 0 {
+          covered = false
           continue
         }
-        var inst = instance(cell, row: r, col: c, colors: screen.colors)
+        let icon = c + 1 < screen.cols && Renderer.iconWithRoom(cell, screen.cell(r, c + 1))
+        covered = icon
+        var inst = instance(cell, row: r, col: c, colors: screen.colors, stretch: icon)
         if reverse {
           swap(&inst.fg, &inst.bg)
         }

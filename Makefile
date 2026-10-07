@@ -143,12 +143,13 @@ build/icons/fosforo.icns: tools/gen_icon.swift
 	swift tools/gen_icon.swift build/icons
 	iconutil -c icns build/icons/fosforo.iconset -o build/icons/fosforo.icns
 
-# Local bundle, ad-hoc signed; Developer ID signing belongs to release.sh.
+# Local bundle, universal (Apple silicon and Intel), ad-hoc signed;
+# Developer ID signing belongs to release.sh.
 app: xcframework icons
-	cd swift && swift build -c release -Xswiftc -warnings-as-errors
+	cd swift && swift build -c release --arch arm64 --arch x86_64 -Xswiftc -warnings-as-errors
 	rm -rf build/fosforo.app
 	mkdir -p build/fosforo.app/Contents/MacOS
-	cp swift/.build/release/fosforo build/fosforo.app/Contents/MacOS/fosforo
+	cp "$$(cd swift && swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/fosforo" build/fosforo.app/Contents/MacOS/fosforo
 	cp assets/Info.plist build/fosforo.app/Contents/Info.plist
 	mkdir -p build/fosforo.app/Contents/Resources
 	cp assets/banner.ans build/icons/fosforo.icns build/fosforo.app/Contents/Resources/

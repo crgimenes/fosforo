@@ -31,9 +31,11 @@ module CFosforo {
 }
 MAP
 
+# The Mac's slice is universal: macos (arm64) and macos-x86 are built apart
+# and joined by lipo below; one download runs on both.
 args=""
-for slice in macos:macosx:arm64-apple-macos14.0 ios:iphoneos:arm64-apple-ios17.0 \
-    ios-sim:iphonesimulator:arm64-apple-ios17.0-simulator; do
+for slice in macos:macosx:arm64-apple-macos14.0 macos-x86:macosx:x86_64-apple-macos14.0 \
+    ios:iphoneos:arm64-apple-ios17.0 ios-sim:iphonesimulator:arm64-apple-ios17.0-simulator; do
     name=${slice%%:*}
     rest=${slice#*:}
     sdk=${rest%%:*}
@@ -58,7 +60,16 @@ for slice in macos:macosx:arm64-apple-macos14.0 ios:iphoneos:arm64-apple-ios17.0
         ;;
     esac
     ar rcs "$out/$name/libfosforo.a" "$out/$name"/obj/*.o
-    args="$args -library $out/$name/libfosforo.a -headers $out/include"
+    case "$name" in
+    macos) ;;
+    macos-x86)
+        lipo -create -output "$out/macos-universal.a" "$out/macos/libfosforo.a" "$out/macos-x86/libfosforo.a"
+        mkdir -p "$out/mac"
+        mv "$out/macos-universal.a" "$out/mac/libfosforo.a"
+        args="$args -library $out/mac/libfosforo.a -headers $out/include"
+        ;;
+    *) args="$args -library $out/$name/libfosforo.a -headers $out/include" ;;
+    esac
 done
 # shellcheck disable=SC2086 # args is a list on purpose
 xcodebuild -create-xcframework $args -output swift/Frameworks/CFosforo.xcframework >/dev/null

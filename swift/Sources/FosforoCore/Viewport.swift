@@ -25,6 +25,10 @@ public final class Viewport {
   public private(set) var selStart: (line: Int, col: Int)?
   public private(set) var selEnd: (line: Int, col: Int)?
   private var selAnchor: (line: Int, col: Int)?
+  /// The selection's part on the screen as it was selected, with where the
+  /// screen began then (counted from the first line ever, so a scroll moves
+  /// it); nil when it lies all in the history, which output never rewrites.
+  private var selLive: (top: Int, text: String)?
   public let finder = Finder()
   public private(set) var finding = false
   var copyMark: (line: Int, col: Int)?
@@ -61,9 +65,26 @@ public final class Viewport {
     dirty = true
     rebase()
     scrollBack = min(scrollBack, session.history())  // ⌘K or a screen switch took it away
+    if let live = selLive, live.top != screenTop() || live.text != liveText() {
+      clearSelection()  // output wrote over it or scrolled it, as in iTerm2
+    }
     if finding {
       finder.refresh(session, restart: false)
     }
+  }
+
+  private func screenTop() -> Int { session.base() + session.history() }
+
+  private func liveText() -> String? {
+    guard let s = selStart, let e = selEnd else { return nil }
+    let first = session.history()
+    guard e.line >= first else { return nil }
+    return session.copyText(from: s.line >= first ? s : (first, 0), to: e)
+  }
+
+  private func selected() {
+    selLive = liveText().map { (screenTop(), $0) }
+    dirty = true
   }
 
   /// session.base() when the addresses here were taken.
@@ -86,6 +107,7 @@ public final class Viewport {
       selStart = nil
       selEnd = nil
       selAnchor = nil
+      selLive = nil
     } else {
       selStart = selStart.map(moved)
       selEnd = selEnd.map(moved)
@@ -125,7 +147,7 @@ public final class Viewport {
     selAnchor = a
     selStart = a
     selEnd = a
-    dirty = true
+    selected()
   }
 
   private static let wordChars = Set("_-./~:@%+=&?#,".unicodeScalars.map(\.value))
@@ -165,7 +187,7 @@ public final class Viewport {
     selAnchor = (line, lo)
     selStart = (line, lo)
     selEnd = (line, hi)
-    dirty = true
+    selected()
   }
 
   /// The whole line of text under `at`: the rows autowrap joined count as
@@ -178,7 +200,7 @@ public final class Viewport {
     selAnchor = (first, 0)
     selStart = (first, 0)
     selEnd = (last, screen.cols - 1)
-    dirty = true
+    selected()
   }
 
   /// Dragging: the anchor stays, the other end follows.
@@ -188,13 +210,14 @@ public final class Viewport {
     let before = h.line < a.line || (h.line == a.line && h.col < a.col)
     selStart = before ? h : a
     selEnd = before ? a : h
-    dirty = true
+    selected()
   }
 
   public func clearSelection() {
     selStart = nil
     selEnd = nil
     selAnchor = nil
+    selLive = nil
     dirty = true
   }
 
@@ -291,6 +314,7 @@ public final class Viewport {
     selStart = (m.line, m.col)
     selEnd = (m.line, m.end)
     selAnchor = selStart
+    selected()
     let top = topLine
     if m.line < top || m.line >= top + screen.rows {
       let want = session.lines() - screen.rows - (m.line - screen.rows / 2)
@@ -401,10 +425,10 @@ extension Viewport {
         selAnchor = m
         selStart = m
         selEnd = m
+        selected()
       } else {
         clearSelection()
       }
-      dirty = true
       return
     case [0x1B, 0x5B, 0x41], [0x1B, 0x4F, 0x41], [UInt8(ascii: "k")]: line -= 1
     case [0x1B, 0x5B, 0x42], [0x1B, 0x4F, 0x42], [UInt8(ascii: "j")]: line += 1

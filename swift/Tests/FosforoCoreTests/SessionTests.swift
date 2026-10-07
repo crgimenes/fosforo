@@ -925,3 +925,37 @@ private func rowText(_ row: [vt_cell]) -> String {
   s.send("y")
   #expect(!vp.copying && s.intercept == nil && copied.hasPrefix("alpha"))
 }
+
+/// As in iTerm2: output that rewrites or scrolls the screen under the
+/// selection takes it away (Enter, clear); output elsewhere on the screen,
+/// or a selection that lies all in the history, leaves it.
+@MainActor @Test func selectionGoesWhenOutputTouchesIt() throws {
+  let host = Feed()
+  let s = try Session(transport: host, rows: 3, cols: 8, history: 10)
+  s.start()
+  host.write("A\r\nB\r\nC")
+  let vp = Viewport(session: s)
+  func show() {
+    vp.outputChanged()
+    s.snapshot(into: &vp.screen, back: vp.scrollBack)
+  }
+  show()
+  vp.selectLine(at: (0, 0))
+  host.write("\u{1B}[3;2Hz")  // C becomes Cz: not under it
+  show()
+  #expect(vp.selectedText() == "A")
+  host.write("\r\n")  // Enter scrolls it up
+  show()
+  #expect(!vp.hasSelection)
+  vp.selectLine(at: (1, 0))
+  host.write("\u{1B}[H\u{1B}[2J")  // clear
+  show()
+  #expect(!vp.hasSelection)
+  host.write("1\r\n2\r\n3\r\n4\r\n5")
+  vp.scrollBack = 2
+  show()
+  vp.selectLine(at: (0, 0))  // in the history
+  host.write("\r\n6")
+  show()
+  #expect(vp.selectedText() == "1")
+}

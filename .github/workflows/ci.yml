@@ -1,0 +1,94 @@
+name: test
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  # The C core (vt, glyph, pty, cfg) under ASan/UBSan, and the rocchetto
+  # host on a pty. rocchetto, Filo, filo-term, Core War and edt are sibling
+  # checkouts, as on a developer's disk.
+  c:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fosforo
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/rocchetto
+          path: rocchetto
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/clang_filo
+          path: clang_filo
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/filo-term
+          path: filo-term
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/corewar
+          path: corewar
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/edt
+          path: edt
+      - run: make -C fosforo all test
+
+  # The Swift package: format, every warning an error, and the tests, SSH
+  # and Mosh against a throwaway sshd and mosh-server on the loopback.
+  swift:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fosforo
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/rocchetto
+          path: rocchetto
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/clang_filo
+          path: clang_filo
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/filo-term
+          path: filo-term
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/corewar
+          path: corewar
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/edt
+          path: edt
+      - run: brew install mosh
+      - run: make -C fosforo swift-fmt swift-build swift-test
+
+  # The C lint, with LLVM's own tools.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fosforo
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/clang_filo
+          path: clang_filo
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/filo-term
+          path: filo-term
+      - name: Install tools
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 23
+          sudo apt-get install -y clang-format-23 clang-tidy-23 cppcheck
+      - run: make -C fosforo fmt-check tidy check LLVM=/usr/lib/llvm-23/bin

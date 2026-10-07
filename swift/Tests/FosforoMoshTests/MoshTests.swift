@@ -314,13 +314,16 @@ func launcherSpeaksMosh() throws {
   #expect(waitScreen(s, "(yes/no)"))
   s.send("yes\r")
   #expect(waitScreen(s, "(mosh)"))
-  // the remote shell's first prompt: a line typed before it may be flushed
-  #expect(
-    waitScreen(s) {
-      $0.components(separatedBy: "(mosh)").last?.contains { !$0.isWhitespace } ?? false
-    })
-  s.send("echo via-mosh-$((6*7)); exit\r")
-  #expect(waitScreen(s, "via-mosh-42"))
+  // a line typed while the remote shell still starts (its rc files, on a busy
+  // machine) may be flushed, and what it prints first need not be its prompt:
+  // the echo, harmless twice, is typed again until it has run
+  var ran = false
+  for _ in 0..<4 where !ran {
+    s.send("echo via-mosh-$((6*7))\r")
+    ran = waitScreen(s, "via-mosh-42", seconds: 5)
+  }
+  #expect(ran)
+  s.send("exit\r")
   #expect(waitScreen(s, "[connection closed]"))
 }
 

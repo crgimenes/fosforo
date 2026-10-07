@@ -619,7 +619,42 @@
       }
     }
     override func rightMouseDown(with event: NSEvent) {
-      report(Int32(VT_MOUSE_PRESS), Int32(VT_BUTTON_RIGHT), event)
+      if !report(Int32(VT_MOUSE_PRESS), Int32(VT_BUTTON_RIGHT), event) {
+        super.rightMouseDown(with: event)
+      }
+    }
+
+    /// The same as the context menu on the iPad.
+    override func menu(for event: NSEvent) -> NSMenu? {
+      let menu = NSMenu()
+      let at = cell(at: event)
+      if let url = session.link(screen.cell(at.row, at.col).link) {
+        let open = menu.addItem(
+          withTitle: "Open Link", action: #selector(openLink(_:)), keyEquivalent: "")
+        open.target = self
+        open.representedObject = url
+        menu.addItem(.separator())
+      }
+      menu.addItem(withTitle: "Copy", action: #selector(copy(_:)), keyEquivalent: "")
+      menu.addItem(withTitle: "Paste", action: #selector(paste(_:)), keyEquivalent: "")
+      menu.addItem(withTitle: "Find…", action: #selector(find(_:)), keyEquivalent: "")
+      menu.addItem(withTitle: "Copy Mode", action: #selector(copyMode(_:)), keyEquivalent: "")
+      menu.addItem(withTitle: "Clear Buffer", action: #selector(clearBuffer(_:)), keyEquivalent: "")
+      menu.addItem(.separator())
+      menu.addItem(
+        withTitle: "New Session", action: #selector(Deck.newSession(_:)), keyEquivalent: "")
+      menu.addItem(
+        withTitle: "Reload Config", action: #selector(AppDelegate.reloadConfig(_:)),
+        keyEquivalent: "")
+      menu.addItem(
+        withTitle: "Close Session", action: #selector(Deck.closeSession(_:)), keyEquivalent: "")
+      return menu
+    }
+
+    @objc private func openLink(_ sender: NSMenuItem) {
+      if let url = sender.representedObject as? URL {
+        NSWorkspace.shared.open(url)
+      }
     }
     override func rightMouseUp(with event: NSEvent) {
       report(Int32(VT_MOUSE_RELEASE), Int32(VT_BUTTON_RIGHT), event)

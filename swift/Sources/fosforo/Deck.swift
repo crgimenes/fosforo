@@ -42,17 +42,34 @@
       window.collectionBehavior.insert(.fullScreenPrimary)
       super.init()
       // where the last window was left, then cascading from the front one
-      let saved = UserDefaults.standard.object(forKey: "NSWindow Frame " + Deck.frameName) != nil
+      let saved = UserDefaults.standard.string(forKey: "NSWindow Frame " + Deck.frameName)
+        .flatMap(Deck.onScreen)
       window.setFrameAutosaveName(Deck.frameName)
       if let front = NSApp.keyWindow {
         let topLeft = NSPoint(x: front.frame.minX, y: front.frame.maxY)
         window.setFrameTopLeftPoint(window.cascadeTopLeft(from: topLeft))
-      } else if !saved {
+      } else if let saved {
+        // AppKit's own restore picks the screen by its size: with two
+        // screens of the same size it put the window on the wrong one
+        window.setFrame(saved, display: false)
+      } else {
         window.center()
       }
       window.delegate = self
       add(first)
       window.makeKeyAndOrderFront(nil)
+    }
+
+    /// The frame in an autosave string ("x y w h" and the screen's), when it
+    /// is still on some screen.
+    static func onScreen(_ saved: String) -> NSRect? {
+      let n = saved.split(separator: " ").compactMap { Double($0) }
+      guard n.count >= 4 else { return nil }
+      let frame = NSRect(x: n[0], y: n[1], width: n[2], height: n[3])
+      guard NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) else {
+        return nil
+      }
+      return frame
     }
 
     private func add(_ view: TerminalView) {

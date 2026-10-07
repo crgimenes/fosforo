@@ -332,14 +332,14 @@ public final class Viewport {
 
 // MARK: - copy mode: the keyboard moves a mark over the screen and the
 // history instead of reaching the host, as in iTerm2 and tmux. Arrows or
-// h j k l move; Space anchors a selection that then follows the mark, as
-// do Shift+arrows; Return or y copies and leaves; Esc or q leaves; g and
+// h j k l move; v anchors a selection that then follows the mark, as
+// do Shift+arrows; y copies and leaves; Esc or q leaves; g and
 // G go to the oldest and the newest line, Home/End or 0/$ to the ends of
 // the line, PageUp/PageDown a screen at a time.
 extension Viewport {
   public var copying: Bool { copyMark != nil }
 
-  /// What the view does with the text when Return copies it.
+  /// What the view does with the text when y copies it.
   public var onCopy: ((String) -> Void)? {
     get { copyHandler }
     set { copyHandler = newValue }
@@ -390,13 +390,13 @@ extension Viewport {
       clearSelection()
       exitCopyMode()
       return
-    case [0x0D], [UInt8(ascii: "y")]:
+    case [UInt8(ascii: "y")]:
       if let text = selectedText() {
         copyHandler?(text)
       }
       exitCopyMode()
       return
-    case [UInt8(ascii: " ")]:
+    case [UInt8(ascii: "v")]:
       if selAnchor == nil {
         selAnchor = m
         selStart = m

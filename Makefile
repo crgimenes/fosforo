@@ -21,7 +21,7 @@ LIB_OBJ = $(patsubst %.c,build/obj/%.o,$(notdir $(C_SRC)))
 # must match platforms in swift/Package.swift
 LIB_FLAGS = -O2 $(FLAGS) -mmacosx-version-min=14.0
 
-.PHONY: release ios-sim ios-device xcframework roc-host all lib test bench fuzz fmt fmt-check tidy check qa clean swift-fmt swift-build swift-test app
+.PHONY: release ios-sim ios-device xcframework roc-host all lib test bench fuzz fmt fmt-check tidy check qa clean swift-fmt swift-build swift-test app install
 
 all: build/vtdump lib roc-host
 
@@ -155,6 +155,13 @@ app: xcframework icons
 	cp assets/PrivacyInfo.xcprivacy build/fosforo.app/Contents/Resources/
 	plutil -lint build/fosforo.app/Contents/Info.plist
 	codesign --force --sign - build/fosforo.app
+
+# The local bundle over the one in APPDIR; a running copy keeps the old
+# binary until it is quit.
+APPDIR ?= /Applications
+install: app
+	rm -rf $(APPDIR)/fosforo.app
+	ditto build/fosforo.app $(APPDIR)/fosforo.app
 
 # iOS simulator bundle, ad-hoc signed. The 3270 font is the repository's
 # (BSD-3-Clause, assets/licenses/3270.txt, in the credits) and is registered

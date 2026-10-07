@@ -30,6 +30,7 @@ repository; the iOS build also needs `../rocchetto`.
 make qa          # everything: C with ASan/UBSan, clang-tidy, cppcheck,
                  # clang-format; Swift lint, warnings as errors, tests
 make app         # build/fosforo.app (ad hoc signed)
+make install     # make app, then over /Applications/fosforo.app (APPDIR=dir)
 make ios-sim     # build/fosforo-sim.app for the simulator
 make ios-device  # install on the paired devices (DEVICE=name for one)
 make icons       # the app icon from assets/kamon.svg
@@ -88,8 +89,10 @@ the grid size and the title.
 
 - ⌘F searches the scrollback; Return gives the keyboard back with the
   matches still lit, ⌘G/⇧⌘G step, Esc closes.
-- ⇧⌘C enters copy mode: arrows or `hjkl` move, Space anchors a selection
-  that follows, Return copies, Esc leaves.
+- ⇧⌘C enters copy mode: arrows or `hjkl` move, `v` anchors a selection
+  that follows, `y` copies and leaves, Esc or `q` gives up.
+- A right click (or a Control-click) opens a menu with the same actions;
+  in a program that takes the mouse (vim, tmux), hold Shift.
 - ⌘↑/⌘↓ jump between prompts (see shell integration), ⌘K clears the
   screen and the history, ⌘+/⌘−/⌘0 change the font, a pinch does the same.
 - Double-click selects a word, triple-click a line (the whole line when it

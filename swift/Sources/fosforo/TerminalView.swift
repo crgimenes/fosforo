@@ -568,6 +568,10 @@
       if vp.finding && vp.finder.editing {
         vp.focusField(false)
       }
+      if event.modifierFlags.contains(.control) && !tracking, let menu = menu(for: event) {
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+        return
+      }
       if event.modifierFlags.contains(.command) {
         let at = cell(at: event)
         if let url = session.link(screen.cell(at.row, at.col).link) {
@@ -649,6 +653,10 @@
       menu.addItem(
         withTitle: "Close Session", action: #selector(Deck.closeSession(_:)), keyEquivalent: "")
       return menu
+    }
+
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+      item.action != #selector(copy(_:)) || vp.selectedText() != nil
     }
 
     @objc private func openLink(_ sender: NSMenuItem) {

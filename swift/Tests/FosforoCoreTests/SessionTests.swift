@@ -377,7 +377,7 @@ func ptyThroughput() throws {
 
 /// The copy-mode mark treats a wide glyph as one cell: left onto its tail
 /// lands on the head, right from the head passes it; Space on it selects
-/// the glyph, and Return copies it.
+/// the glyph, and y copies it.
 @MainActor @Test func copyMarkSkipsWideTails() throws {
   let host = Canned("中A")
   let s = try Session(transport: host, rows: 2, cols: 6, history: 0)
@@ -394,9 +394,9 @@ func ptyThroughput() throws {
   s.send("l")
   #expect(vp.visibleMark()?.col == 2)  // past the glyph
   s.send("h")
-  s.send(" ")
+  s.send("v")
   #expect(vp.selectedText() == "中")
-  s.send("\r")
+  s.send("y")
   #expect(copied == "中" && !vp.copying)
 }
 
@@ -900,8 +900,8 @@ private func rowText(_ row: [vt_cell]) -> String {
   got.lock.unlock()
 }
 
-/// Copy mode: the keys move a mark and never reach the host; Space anchors,
-/// the mark drags the selection, Return hands the text over and leaves.
+/// Copy mode: the keys move a mark and never reach the host; v anchors,
+/// the mark drags the selection, y hands the text over and leaves.
 @MainActor @Test func copyModeSelectsWithTheKeyboard() throws {
   let s = try Session(transport: Canned("alpha beta\r\ngamma\r\n"), rows: 3, cols: 12, history: 0)
   s.start()
@@ -914,12 +914,14 @@ private func rowText(_ row: [vt_cell]) -> String {
   s.send([0x1B, 0x5B, 0x41])  // up: on "gamma"
   s.send("0")
   #expect(vp.visibleMark()! == (1, 0))
-  s.send(" ")
+  s.send("v")
   s.send("$")
   #expect(vp.selectedText() == "gamma")
   s.send("0")
   s.send([0x1B, 0x5B, 0x31, 0x3B, 0x32, 0x41])  // shift+up: the line above joins
   #expect(vp.selectedText()?.hasPrefix("alpha") == true)
-  s.send([0x0D])
+  s.send([0x0D])  // Return is no key here
+  #expect(vp.copying)
+  s.send("y")
   #expect(!vp.copying && s.intercept == nil && copied.hasPrefix("alpha"))
 }

@@ -27,6 +27,8 @@ final class Server {
     userKey = try String(contentsOf: dir.appendingPathComponent("user"), encoding: .utf8)
     knownHosts = KnownHosts(path: dir.appendingPathComponent("known_hosts").path)
     port = Int.random(in: 30000...49151)  // below the ephemeral range
+    // PerSourcePenalties: the tests connect from 127.0.0.1 over and over, many
+    // closing before auth, which sshd (9.8 on) punishes by refusing the source
     let config = """
       ListenAddress 127.0.0.1
       Port \(port)
@@ -37,6 +39,7 @@ final class Server {
       StrictModes no
       PasswordAuthentication no
       KbdInteractiveAuthentication no
+      PerSourcePenalties no
       \(extra)
       """
     try config.write(
@@ -771,6 +774,15 @@ private func infoRequest(_ prompts: [(String, Bool)]) -> [UInt8] {
   #expect(throws: SSHError.self) { try vault.open(String(bytes)) }
 }
 
+/// A connection to a forward here whose reads give up after 5 s: a forward
+/// that drops the connection fails the test instead of holding it.
+private func dialBounded(_ port: Int) throws -> Int32 {
+  let fd = try dial(host: "127.0.0.1", port: port, timeout: 5)
+  var tv = timeval(tv_sec: 5, tv_usec: 0)
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+  return fd
+}
+
 /// A port nothing listens on now, below the ephemeral range (49152 up): one
 /// the system hands out could go to the next outgoing connection, the
 /// client's own to sshd among them, before the test binds it. Tried by
@@ -806,8 +818,10 @@ private func freePort() -> Int {
   let client = SSHClient(config: c)
   try client.connect()
   #expect(client.alive && client.channelCount == 0)
-  for _ in 0..<2 {  // two connections, one after the other
-    let fd = try dial(host: "127.0.0.1", port: port, timeout: 5)
+  // one after the other: the channel of each ends while the next is already
+  // accepted, which may be given the fd number the last one had
+  for _ in 0..<20 {
+    let fd = try dialBounded(port)
     var buf = [UInt8](repeating: 0, count: 64)
     let n = read(fd, &buf, buf.count)
     #expect(n > 8 && String(decoding: buf[0..<max(0, n)], as: UTF8.self).hasPrefix("SSH-2.0-"))
@@ -902,7 +916,7 @@ private func freePort() -> Int {
   defer { client.disconnect() }
   let sp = [UInt8(server.port >> 8), UInt8(server.port & 0xFF)]
   func banner(_ hello: [UInt8], _ reply: Int) throws -> (ok: [UInt8], text: String) {
-    let fd = try dial(host: "127.0.0.1", port: port, timeout: 5)
+    let fd = try dialBounded(port)
     defer { close(fd) }
     _ = hello.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
     var answer = [UInt8](repeating: 0, count: reply)

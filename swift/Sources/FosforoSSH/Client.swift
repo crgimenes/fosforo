@@ -1344,21 +1344,24 @@ public final class SSHChannel: @unchecked Sendable {
   /// writing (a TCP peer may still answer); otherwise it ends it.
   /// yagni: a slow fd holds the reader (no flow control past the window).
   func bridge(_ fd: Int32, halfClose: Bool) {
+    let owned = BridgedFD(fd)
     onData = { data in
-      var off = 0
-      while off < data.count {
-        let n = data[off...].withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
-        if n <= 0 {
-          break
+      owned.use { fd in
+        var off = 0
+        while off < data.count {
+          let n = data[off...].withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+          if n <= 0 {
+            break
+          }
+          off += n
         }
-        off += n
       }
     }
     onEOF = {
-      shutdown(fd, halfClose ? SHUT_WR : SHUT_RDWR)  // the far side reads end of file
+      owned.use { shutdown($0, halfClose ? SHUT_WR : SHUT_RDWR) }  // the far side reads end of file
     }
     onClose = { _, _ in
-      shutdown(fd, SHUT_RDWR)
+      owned.use { shutdown($0, SHUT_RDWR) }
     }
     start()
     let pump = Thread { [self] in
@@ -1371,10 +1374,40 @@ public final class SSHChannel: @unchecked Sendable {
         send(Array(buf[0..<n]))
       }
       close()
-      Darwin.close(fd)
+      owned.close()
     }
     pump.name = "fosforo.ssh.tunnel"
     pump.start()
+  }
+}
+
+/// A bridged fd, closed once, by its pump. What still comes on the channel
+/// after that (the server's EOF and close for it) must not touch the number:
+/// the system may already have handed it to the next connection a forward
+/// accepted, which a shutdown would end.
+private final class BridgedFD: @unchecked Sendable {
+  private let lock = NSLock()
+  private var fd: Int32?
+
+  init(_ fd: Int32) {
+    self.fd = fd
+  }
+
+  func use(_ body: (Int32) -> Void) {
+    lock.lock()
+    defer { lock.unlock() }
+    if let fd {
+      body(fd)
+    }
+  }
+
+  func close() {
+    lock.lock()
+    defer { lock.unlock() }
+    if let fd {
+      Darwin.close(fd)
+    }
+    fd = nil
   }
 }
 

@@ -28,6 +28,8 @@ final class Server {
     userKey = try String(contentsOf: dir.appendingPathComponent("user"), encoding: .utf8)
     knownHosts = KnownHosts(path: dir.appendingPathComponent("known_hosts").path)
     port = Int.random(in: 30000...49151)  // below the ephemeral range
+    // PerSourcePenalties: the tests connect from 127.0.0.1 over and over, many
+    // closing before auth, which sshd (9.8 on) punishes by refusing the source
     let config = """
       ListenAddress 127.0.0.1
       Port \(port)
@@ -38,6 +40,7 @@ final class Server {
       StrictModes no
       PasswordAuthentication no
       KbdInteractiveAuthentication no
+      PerSourcePenalties no
       \(extra)
       """
     try config.write(

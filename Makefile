@@ -152,7 +152,7 @@ app: xcframework icons
 	cp "$$(cd swift && swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/fosforo" build/fosforo.app/Contents/MacOS/fosforo
 	cp assets/Info.plist build/fosforo.app/Contents/Info.plist
 	mkdir -p build/fosforo.app/Contents/Resources
-	cp assets/banner.ans build/icons/fosforo.icns build/fosforo.app/Contents/Resources/
+	cp assets/banner.ans assets/banner-narrow.ans build/icons/fosforo.icns build/fosforo.app/Contents/Resources/
 	cp assets/PrivacyInfo.xcprivacy build/fosforo.app/Contents/Resources/
 	plutil -lint build/fosforo.app/Contents/Info.plist
 	codesign --force --sign - build/fosforo.app
@@ -177,7 +177,7 @@ ios-sim: xcframework icons
 	cp assets/Info-iOS.plist build/fosforo-sim.app/Info.plist
 	cp assets/PrivacyInfo.xcprivacy build/fosforo-sim.app/
 	if [ -f "$(FONT_3270)" ]; then cp "$(FONT_3270)" build/fosforo-sim.app/; fi
-	cp assets/banner.ans build/icons/AppIcon*.png build/fosforo-sim.app/
+	cp assets/banner.ans assets/banner-narrow.ans build/icons/AppIcon*.png build/fosforo-sim.app/
 	plutil -lint build/fosforo-sim.app/Info.plist
 	codesign --force --sign - build/fosforo-sim.app
 

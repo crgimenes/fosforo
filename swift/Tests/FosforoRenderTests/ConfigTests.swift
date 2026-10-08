@@ -27,6 +27,17 @@ import Testing
   #expect(t.keyDelay == 250 && t.keyRepeat == 20)
 }
 
+/// DEVICE says where the config runs, and setting it changes nothing.
+@Test func deviceIsReadNotWritten() throws {
+  let t = try Theme.parse(
+    """
+    (if (= DEVICE "mac") (set FontSize 30) (set FontSize 10))
+    (set DEVICE "ipad")
+    """)
+  #expect(Theme.device == "mac")
+  #expect(t.fontSize == 30)
+}
+
 @Test func mistakesAreReported() throws {
   let cases = [
     "(set Colour1 \"#ff0000\")",

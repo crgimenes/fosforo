@@ -57,9 +57,15 @@ cat >"$out/entitlements.plist" <<EOF
 EOF
 
 (cd swift && xcodebuild -scheme fosforo-ios -destination 'generic/platform=iOS' ARCHS=arm64 \
-    -configuration Release -derivedDataPath ../build/dd-store CODE_SIGNING_ALLOWED=NO -quiet build)
+    -configuration Release -derivedDataPath ../build/dd-store CODE_SIGNING_ALLOWED=NO \
+    CLANG_ENABLE_CODE_COVERAGE=NO ENABLE_CODE_COVERAGE=NO -quiet build)
 mkdir -p "$app"
-cp build/dd-store/Build/Products/Release-iphoneos/fosforo-ios "$app/fosforo"
+# The link of the package's executable records the deployment target as its
+# SDK (17.0 where 27.0 was used), and App Store Connect refuses an old SDK:
+# the binary says which SDK it was really built against.
+xcrun vtool -set-build-version ios "$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" assets/Info-iOS.plist)" \
+    "$(xcrun --sdk iphoneos --show-sdk-version)" -replace \
+    -output "$app/fosforo" build/dd-store/Build/Products/Release-iphoneos/fosforo-ios
 plist=$app/Info.plist
 cp assets/Info-iOS.plist "$plist"
 set_key() { /usr/libexec/PlistBuddy -c "Set :$1 $2" "$plist" 2>/dev/null ||
@@ -106,7 +112,7 @@ xcrun actool "$out/Assets.xcassets" --compile "$app" --platform iphoneos \
 plutil -lint "$plist" >/dev/null
 
 if [ -f "${FONT_3270:-}" ]; then cp "$FONT_3270" "$app/"; fi
-cp assets/banner.ans assets/PrivacyInfo.xcprivacy "$app/"
+cp assets/banner.ans assets/banner-narrow.ans assets/PrivacyInfo.xcprivacy "$app/"
 cp "$profile" "$app/embedded.mobileprovision"
 codesign --force --sign "Apple Distribution: $(pb TeamName) ($team)" \
     --entitlements "$out/entitlements.plist" --generate-entitlement-der --timestamp=none "$app"

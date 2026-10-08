@@ -14,6 +14,8 @@
     private let user: String
     private let host: String
     private let banner: [UInt8]
+    private let bannerNarrow: [UInt8]
+    private let greeting: String
     private let commands: String
     private let startDirectory: String?
     private var cwd: String?
@@ -47,18 +49,22 @@
       return cwd
     }
 
-    /// banner: shown first, when it fits the window. commands: the app's
+    /// banner: shown first, when it fits the window; bannerNarrow in its
+    /// place when only that fits. commands: the app's
     /// own, which the shell hands to onCommand. directory: where to open,
     /// as another session's `directory` says it; the home when it is gone.
     public init(
       home: URL, user: String, host: String, commands: [String] = [], banner: [UInt8] = [],
-      directory: String? = nil, rows: Int, cols: Int
+      bannerNarrow: [UInt8] = [], greeting: String = "", directory: String? = nil, rows: Int,
+      cols: Int
     ) throws {
       try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
       self.home = home
       self.user = user
       self.host = host
       self.banner = banner
+      self.bannerNarrow = bannerNarrow
+      self.greeting = greeting
       self.commands = commands.joined(separator: " ")
       startDirectory = directory
       size = (rows, cols)
@@ -139,8 +145,14 @@
         lock.unlock()
       }
       track()
-      if !banner.isEmpty, RocShell.width(of: banner) <= first.cols {
-        output(banner + Array("\r\n".utf8))
+      if let art = [banner, bannerNarrow].first(where: {
+        !$0.isEmpty && RocShell.width(of: $0) <= first.cols
+      }) {
+        output(art + Array("\r\n".utf8))
+      }
+      if !greeting.isEmpty {
+        let lines = greeting.split(separator: "\n", omittingEmptySubsequences: false)
+        output(Array("\u{1b}[2m\(lines.joined(separator: "\r\n"))\u{1b}[0m\r\n".utf8))
       }
       var buf = [UInt8](repeating: 0, count: 65536)
       var active = Date()  // the last key, output or command

@@ -367,6 +367,18 @@
       }
     }
 
+    /// A banner's bytes; "" for none. The default path not written yet (an
+    /// install older than the file) is the copy in the app.
+    private func art(_ path: String, default fallback: String, bundled: String) -> [UInt8] {
+      guard !path.isEmpty else { return [] }
+      if let bytes = try? Data(contentsOf: Theme.expand(path)) {
+        return [UInt8](bytes)
+      }
+      guard path == fallback, let url = Bundle.main.url(forResource: bundled, withExtension: "ans")
+      else { return [] }
+      return (try? [UInt8](Data(contentsOf: url))) ?? []
+    }
+
     private func add(directory: String? = nil) throws {
       let renderer = try Renderer(theme: theme, scale: UIScreen.main.scale)
       let home = Theme.home
@@ -374,13 +386,13 @@
       launcher.clipboard = { UIPasteboard.general.string }
       let user = theme.user.isEmpty ? deviceUser : theme.user
       launcher.localUser = user
-      let banner =
-        theme.banner.isEmpty
-        ? [] : (try? [UInt8](Data(contentsOf: Theme.expand(theme.banner)))) ?? []
+      let banner = art(theme.banner, default: Theme().banner, bundled: "banner")
+      let narrow = art(theme.bannerNarrow, default: Theme().bannerNarrow, bundled: "banner-narrow")
       let shell = try ShellSwitch(
         home: home, launcher: launcher, user: user,
         host: theme.hostName.isEmpty ? deviceHost : theme.hostName, banner: banner,
-        directory: directory, rows: theme.rows, cols: theme.cols)
+        bannerNarrow: narrow, greeting: theme.greeting, directory: directory, rows: theme.rows,
+        cols: theme.cols)
       let session = try Session(
         transport: shell, rows: theme.rows, cols: theme.cols, history: theme.history)
       theme.apply { session.configure(color: $0, rgb: $1) }

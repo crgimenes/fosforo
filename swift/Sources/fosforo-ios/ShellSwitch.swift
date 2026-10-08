@@ -17,13 +17,14 @@
 
     init(
       home: URL, launcher: Launcher, user: String, host: String, banner: [UInt8],
-      directory: String?, rows: Int, cols: Int
+      bannerNarrow: [UInt8], greeting: String, directory: String?, rows: Int, cols: Int
     ) throws {
       self.launcher = launcher
       size = (rows, cols)
       shell = try RocShell(
         home: home, user: user, host: host, commands: Launcher.shellCommands, banner: banner,
-        directory: directory, rows: rows, cols: cols)
+        bannerNarrow: bannerNarrow, greeting: greeting, directory: directory, rows: rows, cols: cols
+      )
       current = shell
       shell.onCommand = { [weak self] words in self?.toLauncher(words) }
       shell.clipboardRead = { UIPasteboard.general.string }

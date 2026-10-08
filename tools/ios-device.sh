@@ -79,7 +79,7 @@ cp build/dd-device/Build/Products/Release-iphoneos/fosforo-ios "$app/fosforo"
 cp assets/Info-iOS.plist "$app/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleSupportedPlatforms:0 iPhoneOS" "$app/Info.plist"
 if [ -f "${FONT_3270:-}" ]; then cp "$FONT_3270" "$app/"; fi
-cp assets/banner.ans assets/PrivacyInfo.xcprivacy build/icons/AppIcon*.png "$app/"
+cp assets/banner.ans assets/banner-narrow.ans assets/PrivacyInfo.xcprivacy build/icons/AppIcon*.png "$app/"
 cp "$profile" "$app/embedded.mobileprovision"
 codesign --force --sign "Apple Development" --entitlements "$tmp/entitlements.plist" \
     --timestamp=none "$app"

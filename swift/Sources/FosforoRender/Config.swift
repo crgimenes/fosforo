@@ -58,11 +58,20 @@ extension Theme {
     ;; (set OptionArrows "xterm")    ; Option+arrows as iTerm2 (tmux M-Left/M-Right);
     ;;                               ; "word": ESC b / ESC f, by the word in zsh
     ;;
+    ;; DEVICE says where this runs: "iphone", "ipad" or "mac". For example,
+    ;; a smaller font on the phone:
+    ;; (if (= DEVICE "iphone") (set FontSize 16) (set FontSize 18))
+    ;;
     ;; The shell (rocchetto, on iPad and iPhone):
     ;; (set User "")                 ; the prompt's user; "" is the device's
     ;; (set HostName "")             ; the prompt's host; "" is the device's name
     ;; (set Banner "~/.config/fosforo/banner.ans") ; shown when a shell opens, if
     ;;                               ; it fits; any text or ANSI art; "" for none
+    ;; (set BannerNarrow "~/.config/fosforo/banner-narrow.ans") ; in its place
+    ;;                               ; when it does not fit; "" for none
+    ;; (set Greeting "help      the commands, what each does\\nedt FILE  ...")
+    ;;                               ; lines under it, on any screen, "\\n"
+    ;;                               ; between them; "" for none
     ;;
     ;; (set Foreground "#bbbbbb")
     ;; (set Background "#000000")
@@ -170,11 +179,13 @@ extension Theme {
       try FileManager.default.createDirectory(
         at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
       try defaultConfig.write(to: url, atomically: true, encoding: .utf8)
-      let banner = url.deletingLastPathComponent().appendingPathComponent("banner.ans")
-      if let art = Bundle.main.url(forResource: "banner", withExtension: "ans"),
-        !FileManager.default.fileExists(atPath: banner.path)
-      {
-        try? FileManager.default.copyItem(at: art, to: banner)
+      for name in ["banner", "banner-narrow"] {
+        let banner = url.deletingLastPathComponent().appendingPathComponent(name + ".ans")
+        if let art = Bundle.main.url(forResource: name, withExtension: "ans"),
+          !FileManager.default.fileExists(atPath: banner.path)
+        {
+          try? FileManager.default.copyItem(at: art, to: banner)
+        }
       }
     }
     let themes = url.deletingLastPathComponent().appendingPathComponent("themes")
@@ -208,7 +219,31 @@ extension Theme {
 
   /// The config's variables, as the core declares them to the script.
   static func variables(_ keys: [(String, Key)], of t: Theme) -> [cfg_var] {
-    keys.map { name, key in variable(name, key, of: t) }
+    // DEVICE comes after the keys and is never read back: what a script
+    // sets there changes nothing
+    var device = cfg_var()
+    device.name = UnsafePointer(strdup("DEVICE"))
+    device.kind = Int32(CFG_STR)
+    setString(&device, Theme.device)
+    return keys.map { name, key in variable(name, key, of: t) } + [device]
+  }
+
+  /// "iphone", "ipad" or "mac": for an (if (= DEVICE "iphone") ...) in the
+  /// config. From the model's name, not UIKit, so any thread may ask.
+  public static var device: String {
+    #if os(iOS)
+      var model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? ""
+      if model.isEmpty {
+        var size = 0
+        sysctlbyname("hw.machine", nil, &size, nil, 0)
+        var name = [CChar](repeating: 0, count: size)
+        sysctlbyname("hw.machine", &name, &size, nil, 0)
+        model = String(cString: name)
+      }
+      return model.hasPrefix("iPad") ? "ipad" : "iphone"
+    #else
+      return "mac"
+    #endif
   }
 
   static func freeNames(_ vars: [cfg_var]) {
@@ -235,6 +270,8 @@ extension Theme {
       ("StatusBar", .flag(\.statusBar)), ("Bell", .text(\.bell)), ("User", .text(\.user)),
       ("Clipboard", .text(\.clipboard)), ("OptionArrows", .text(\.optionArrows)),
       ("HostName", .text(\.hostName)), ("Banner", .text(\.banner)),
+      ("BannerNarrow", .text(\.bannerNarrow)),
+      ("Greeting", .text(\.greeting)),
       ("KeyDelay", .count(\.keyDelay, 50...2000)), ("KeyRepeat", .count(\.keyRepeat, 10...500)),
       ("Foreground", .color(\.foreground)), ("Background", .color(\.background)),
       ("Bold", .color(\.bold)), ("Cursor", .color(\.cursor)),

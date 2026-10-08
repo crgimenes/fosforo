@@ -43,6 +43,15 @@ public struct Theme: Sendable, Equatable {
   public var hostName = ""
   /// Shown when a shell opens, if it fits the window; "" for none.
   public var banner = "~/.config/fosforo/banner.ans"
+  /// In its place when it does not fit (a phone held upright).
+  public var bannerNarrow = "~/.config/fosforo/banner-narrow.ans"
+  /// Lines under it, on any screen (a phone has no room for the banner):
+  /// the first things to type. 44 columns at most, an iPhone held upright.
+  public var greeting = """
+    help      the commands, what each does
+    edt FILE  edit a file (the editor)
+    settings  edt ~/.config/fosforo/init.filo
+    """
   /// A held key on a hardware keyboard (iPad, iPhone; the Mac repeats as
   /// the system does): first repeat after keyDelay ms, then every keyRepeat.
   public var keyDelay = 300

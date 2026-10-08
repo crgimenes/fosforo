@@ -221,6 +221,30 @@ func moshSessionOverRealServer() throws {
   #expect(s.hasExited)
 }
 
+/// The first screen from the server is painted whole: the session still
+/// shows the local shell, and a diff from the blank state would mix into it.
+@Test(.enabled(if: FileManager.default.isExecutableFile(atPath: moshServer)))
+func moshFirstScreenIsPaintedWhole() throws {
+  let server = try Server()
+  let ep = try MoshTransport.bootstrap(ssh: try server.config(), server: moshServer)
+  defer {
+    if let pid = ep.serverPID {
+      kill(pid_t(pid), SIGTERM)
+    }
+  }
+  let mosh = try MoshTransport(endpoint: ep, rows: 24, cols: 80)
+  let s = try Session(transport: mosh, rows: 24, cols: 80, history: 0)
+  s.start()
+  s.send("echo first-$((6*7))\r")
+  #expect(waitScreen(s, "first-42"))
+  #expect(mosh.repaints >= 1)
+  s.send("exit\r")
+  let deadline = Date().addingTimeInterval(20)
+  while !s.hasExited && Date() < deadline {
+    Thread.sleep(forTimeInterval: 0.05)
+  }
+}
+
 final class Every: @unchecked Sendable {
   private let lock = NSLock()
   private var n = 0

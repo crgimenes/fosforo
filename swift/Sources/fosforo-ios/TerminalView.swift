@@ -123,7 +123,7 @@
       ])
       for name in [Notification.Name.GCKeyboardDidConnect, .GCKeyboardDidDisconnect] {
         NotificationCenter.default.addObserver(
-          self, selector: #selector(keyboardsChanged), name: name, object: nil)
+          self, selector: #selector(keyboardsChanged(_:)), name: name, object: nil)
       }
       let twoFingers = UITapGestureRecognizer(target: self, action: #selector(twoFingerTap))
       twoFingers.numberOfTouchesRequired = 2
@@ -710,11 +710,20 @@
     }
     private var keysWanted = false  // asked for from the context menu
 
+    /// The on-screen keyboard, or with a hardware one only the bar, is up.
+    fileprivate var keyboardShown: Bool {
+      isFirstResponder && (GCKeyboard.coalesced == nil || keysWanted)
+    }
+
     /// From the context menu: with a hardware keyboard attached iPadOS keeps
     /// its own keyboard away, but the bar of extra keys can still come up.
     fileprivate func toggleKeyboard() {
-      if isFirstResponder {
+      if keyboardShown {
         keysWanted = false
+        if GCKeyboard.coalesced != nil {
+          reloadInputViews()  // the bar goes; typing on the hardware keyboard goes on
+          return
+        }
         resignFirstResponder()
         return
       }
@@ -723,8 +732,12 @@
       becomeFirstResponder()
     }
 
-    @objc private func keyboardsChanged() {
+    @objc private func keyboardsChanged(_ note: Notification) {
       reloadInputViews()
+      // a keyboard just connected is there to type in the session in front
+      if note.name == .GCKeyboardDidConnect, !isHidden, window?.isKeyWindow == true {
+        becomeFirstResponder()
+      }
     }
 
     private static let allBarKeys: [(String, [UInt8]?)] = [
@@ -1032,7 +1045,7 @@
         UIAction(title: "Find") { [weak self] _ in self?.showFind() },
         UIAction(title: "Copy Mode") { [weak self] _ in self?.copyMode() },
         UIAction(title: "Clear Buffer") { [weak self] _ in self?.clearBuffer() },
-        UIAction(title: isFirstResponder ? "Hide Keyboard" : "Show Keyboard") { [weak self] _ in
+        UIAction(title: keyboardShown ? "Hide Keyboard" : "Show Keyboard") { [weak self] _ in
           self?.toggleKeyboard()
         },
         UIAction(title: "New Session") { [weak self] _ in

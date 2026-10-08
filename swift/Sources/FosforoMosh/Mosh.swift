@@ -90,7 +90,9 @@ public final class MoshTransport: Transport, @unchecked Sendable {
   // incoming screen states
   private var states: [(num: UInt64, term: OpaquePointer, echo: UInt64)] = []
   private var remoteNum: UInt64 = 0
-  private var displayed: UInt64 = 0
+  // nil until a state of ours is on screen: what the session shows before the
+  // first one is the local shell's, not the blank state 0 diffs assume
+  private var displayed: UInt64?
   private var ackDue: Date?
   private var sessionRows: Int
   private var sessionCols: Int

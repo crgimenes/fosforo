@@ -3,7 +3,9 @@ import Foundation
 /// Host aliases in the ssh_config format, so a ~/.ssh/config can be copied
 /// in as it is. HostName, User, Port, IdentityFile, IdentitiesOnly,
 /// ProxyJump, ServerAlive*, LocalForward, RemoteForward, DynamicForward
-/// and ForwardAgent are read; the rest (AddKeysToAgent, UseKeychain...) is ignored. As in
+/// and ForwardAgent are read; the rest (AddKeysToAgent, UseKeychain...) is ignored.
+/// Mosh (yes: ssh to this host is mosh) and MoshServer (its path there) are
+/// fosforo's own; `IgnoreUnknown Mosh,MoshServer` keeps OpenSSH quiet about them. As in
 /// OpenSSH, every Host block whose patterns match applies, in file order,
 /// and the first value found wins (IdentityFile adds up): specific blocks
 /// go first, `Host *` last.
@@ -22,6 +24,8 @@ public struct SSHHosts: Sendable {
     public var remoteForwards: [String] = []  // as -R spells them
     public var dynamicForwards: [String] = []  // as -D spells them
     public var forwardAgent: Bool?
+    public var mosh: Bool?  // Mosh yes
+    public var moshServer: String?  // MoshServer: mosh-server's path on the host
 
     public init(
       hostName: String? = nil, user: String? = nil, port: Int? = nil, identityFiles: [String] = [],
@@ -139,6 +143,8 @@ public struct SSHHosts: Sendable {
         case "dynamicforward": e.dynamicForwards.append(value)
         case "forwardagent" where e.forwardAgent == nil:
           e.forwardAgent = value.lowercased() == "yes"
+        case "mosh" where e.mosh == nil: e.mosh = value.lowercased() == "yes"
+        case "moshserver" where e.moshServer == nil: e.moshServer = value
         case "serveraliveinterval" where e.aliveInterval == nil: e.aliveInterval = Int(value)
         case "serveralivecountmax" where e.aliveCountMax == nil: e.aliveCountMax = Int(value)
         case "port" where e.port == nil:

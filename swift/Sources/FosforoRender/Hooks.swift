@@ -22,9 +22,11 @@ public final class Hooks: @unchecked Sendable {
   public var onNotice: ((String) -> Void)?
 
   /// Runs the config as Theme.parse does and keeps the interpreter.
-  public static func open(_ source: String, themes: URL?) throws -> (Theme, Hooks) {
+  public static func open(_ source: String, themes: URL?, base: Theme = Theme()) throws
+    -> (Theme, Hooks)
+  {
     let keys = Theme.keys()
-    var vars = Theme.variables(keys, of: Theme())
+    var vars = Theme.variables(keys, of: base)
     let bytes = Array(source.utf8)
     var err = [CChar](repeating: 0, count: 512)
     guard let s = cfg_open(bytes, bytes.count, themes?.path, &vars, vars.count, &err, err.count)

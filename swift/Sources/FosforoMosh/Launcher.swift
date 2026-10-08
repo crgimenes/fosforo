@@ -291,7 +291,8 @@ public final class Launcher: Transport, @unchecked Sendable {
 
   /// [user@]host, where host may be an alias from ssh_config in the
   /// config directory; -p on the command line beats the file.
-  private func parse(_ args: [String], mosh: Bool) throws -> Target {
+  private func parse(_ args: [String], mosh asked: Bool) throws -> Target {
+    var mosh = asked
     var port: Int?
     var target: String?
     var server = "mosh-server"
@@ -415,6 +416,18 @@ public final class Launcher: Transport, @unchecked Sendable {
       }
     }
     let alias = SSHHosts(options.joined(separator: "\n") + "\n" + file)[name]
+    // Mosh yes: ssh to that host is mosh, unless something only ssh carries
+    // is asked for, on the line or in the config (a jump, forwards, the agent)
+    if !mosh, alias?.mosh == true, jump == nil, alias?.proxyJump == nil, !agent, !noSession,
+      local.isEmpty, remote.isEmpty, dynamic.isEmpty, alias?.localForwards.isEmpty != false,
+      alias?.remoteForwards.isEmpty != false, alias?.dynamicForwards.isEmpty != false,
+      alias?.forwardAgent != true
+    {
+      mosh = true
+    }
+    if mosh, server == "mosh-server", let s = alias?.moshServer {
+      server = s
+    }
     // as on a computer: no user@ and no User, the one at the keyboard
     guard let who = user ?? login ?? alias?.user ?? localUser else {
       throw SSHError.io("\(name): no user (use user@\(name), or User in ~/.ssh/config)")
@@ -464,6 +477,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     "hostname", "user", "port", "identityfile", "identitiesonly", "proxyjump",
     "serveraliveinterval", "serveralivecountmax", "localforward", "remoteforward",
     "dynamicforward", "forwardagent", "pubkeyauthentication", "preferredauthentications",
+    "mosh", "moshserver",
   ]
 
   private var knownHosts: KnownHosts {
@@ -857,7 +871,9 @@ public final class Launcher: Transport, @unchecked Sendable {
     }
   }
 
-  private func keyFiles() -> [URL] {
+  private func keyFiles() -> [URL] { Launcher.keyFiles(in: ssh) }
+
+  private static func keyFiles(in ssh: URL) -> [URL] {
     let names = (try? FileManager.default.contentsOfDirectory(atPath: ssh.path)) ?? []
     return names.sorted().map { ssh.appendingPathComponent($0) }.filter { url in
       guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
@@ -865,27 +881,43 @@ public final class Launcher: Transport, @unchecked Sendable {
     }
   }
 
-  private func listKeys() {
-    let files = keyFiles()
-    if files.isEmpty {
-      say("no keys in ~/.ssh (key fetch brings one; key shows this device's)\r\n")
-    }
-    let width = (files.map { $0.lastPathComponent.count }.max() ?? 0) + 2
-    for url in files {
-      guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+  /// A private key in ~/.ssh as `key list` shows it.
+  public struct KeyInfo: Sendable, Equatable {
+    public var name: String
+    public var type: String  // "ssh-ed25519"; "?" when the public half is not at hand
+    public var state: String  // "protected", "passphrase" or "plain text"
+    public var publicLine: String?
+  }
+
+  public static func keys(in ssh: URL) -> [KeyInfo] {
+    keyFiles(in: ssh).compactMap { url in
+      guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
       var pub =
         Vault.publicLine(text) ?? (try? String(contentsOfFile: url.path + ".pub", encoding: .utf8))
       if pub == nil, let k = try? PrivateKey.deferred(text, pub: nil, name: "", passphrase: nil) {
         pub = k.authorizedKey
       }
-      let type = pub?.split(separator: " ").first.map(String.init) ?? "?"
       let state =
         Vault.isProtected(text)
         ? "protected" : PrivateKey.isEncrypted(text) ? "passphrase" : "plain text"
-      let short = type.replacingOccurrences(of: "ecdsa-sha2-", with: "")  // fits a phone
+      return KeyInfo(
+        name: url.lastPathComponent,
+        type: pub?.split(separator: " ").first.map(String.init) ?? "?", state: state,
+        publicLine: pub?.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+  }
+
+  private func listKeys() {
+    let keys = Launcher.keys(in: ssh)
+    if keys.isEmpty {
+      say("no keys in ~/.ssh (key fetch brings one; key shows this device's)\r\n")
+    }
+    let width = (keys.map { $0.name.count }.max() ?? 0) + 2
+    for k in keys {
+      let short = k.type.replacingOccurrences(of: "ecdsa-sha2-", with: "")  // fits a phone
       say(
-        url.lastPathComponent.padding(toLength: width, withPad: " ", startingAt: 0)
-          + short.padding(toLength: 13, withPad: " ", startingAt: 0) + state + "\r\n")
+        k.name.padding(toLength: width, withPad: " ", startingAt: 0)
+          + short.padding(toLength: 13, withPad: " ", startingAt: 0) + k.state + "\r\n")
     }
   }
 

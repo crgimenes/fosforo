@@ -22,7 +22,8 @@
       self.launcher = launcher
       size = (rows, cols)
       shell = try RocShell(
-        home: home, user: user, host: host, commands: Launcher.shellCommands, banner: banner,
+        home: home, user: user, host: host, commands: Launcher.shellCommands + ["config"],
+        banner: banner,
         bannerNarrow: bannerNarrow, greeting: greeting, directory: directory, rows: rows, cols: cols
       )
       current = shell
@@ -40,7 +41,16 @@
       shell.start(output: output, exit: exit)
     }
 
+    /// `config`: the settings screen, over the terminal; the shell goes on.
+    var onConfig: (@MainActor () -> Void)?
+
     private func toLauncher(_ words: [String]) {
+      if words.first == "config" {
+        let open = onConfig
+        Task { @MainActor in open?() }
+        shell.done(0)
+        return
+      }
       lock.lock()
       current = launcher
       let out = output

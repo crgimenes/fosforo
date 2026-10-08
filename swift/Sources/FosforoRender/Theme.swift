@@ -46,11 +46,12 @@ public struct Theme: Sendable, Equatable {
   /// In its place when it does not fit (a phone held upright).
   public var bannerNarrow = "~/.config/fosforo/banner-narrow.ans"
   /// Lines under it, on any screen (a phone has no room for the banner):
-  /// the first things to type. 44 columns at most, an iPhone held upright.
+  /// the first things to type. 36 columns at most: a phone upright, a larger font.
   public var greeting = """
-    help      the commands, what each does
-    edt FILE  edit a file (the editor)
-    settings  edt ~/.config/fosforo/init.filo
+    help      what each command does
+    config    servers, keys, looks
+    edt FILE  the text editor
+    ~/.config/fosforo/init.filo  the rest
     """
   /// A held key on a hardware keyboard (iPad, iPhone; the Mac repeats as
   /// the system does): first repeat after keyDelay ms, then every keyRepeat.

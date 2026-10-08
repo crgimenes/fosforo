@@ -528,6 +528,14 @@ private final class QuietPort {
 
 /// Lines before the first Host apply to every host, and come first; as for
 /// the other scalars, the first IdentitiesOnly wins, even when it says no.
+@Test func hostsReadMosh() {
+  let h = SSHHosts(
+    "IgnoreUnknown Mosh,MoshServer\nHost lab\n  Mosh yes\n  MoshServer /opt/bin/mosh-server\nHost *\n  Mosh no\n"
+  )
+  #expect(h["lab"]?.mosh == true && h["lab"]?.moshServer == "/opt/bin/mosh-server")
+  #expect(h["other"]?.mosh == false && h["other"]?.moshServer == nil)
+}
+
 @Test func sshConfigGlobalsAndIdentitiesOnlyFirst() {
   let h = SSHHosts(
     """

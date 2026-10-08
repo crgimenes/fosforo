@@ -377,6 +377,49 @@ func launcherSpeaksMosh() throws {
   #expect(waitScreen(s, "[connection closed]"))
 }
 
+/// Mosh yes in the config: ssh to that host goes over mosh, with the
+/// config's MoshServer; -o Mosh=no keeps it ssh.
+@Test(.enabled(if: FileManager.default.isExecutableFile(atPath: moshServer)))
+func sshToAMoshHostIsMosh() throws {
+  let server = try Server()
+  let dir = server.dir.appendingPathComponent("device")
+  let launcher = testLauncher(dir)
+  let key = try launcher.deviceKey()
+  let authorized = server.dir.appendingPathComponent("authorized_keys")
+  try (try String(contentsOf: authorized, encoding: .utf8) + key.authorizedKey + "\n").write(
+    to: authorized, atomically: true, encoding: .utf8)
+  try """
+  IgnoreUnknown Mosh,MoshServer
+  Host lab
+    HostName 127.0.0.1
+    User \(NSUserName())
+    Port \(server.port)
+    Mosh yes
+    MoshServer \(moshServer)
+
+  """.write(to: try sshDir(dir).appendingPathComponent("config"), atomically: true, encoding: .utf8)
+  let s = try Session(transport: Typed(launcher), rows: 24, cols: 100, history: 100)
+  s.start()
+  #expect(waitScreen(s, "test> "))
+  s.send("ssh -o Mosh=no lab\r")
+  #expect(waitScreen(s, "(yes/no)"))
+  s.send("yes\r")
+  s.send("echo plain-$((6*7)); exit\r")
+  #expect(waitScreen(s, "plain-42"))
+  #expect(waitScreen(s, "[connection closed]"))
+  #expect(!screenText(s).contains("(mosh)"))
+  s.send("ssh lab\r")
+  #expect(waitScreen(s, "(mosh)"))
+  var ran = false
+  for _ in 0..<4 where !ran {
+    s.send("echo via-mosh-$((6*7))\r")
+    ran = waitScreen(s, "via-mosh-42", seconds: 5)
+  }
+  #expect(ran)
+  s.send("exit\r")
+  #expect(waitScreen(s, "[connection closed]"))
+}
+
 @Test(.enabled(if: FileManager.default.isExecutableFile(atPath: moshServer)))
 func moshFollowsANewSourcePort() throws {
   let server = try Server()

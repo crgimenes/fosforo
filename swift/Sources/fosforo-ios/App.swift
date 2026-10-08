@@ -393,6 +393,7 @@
         host: theme.hostName.isEmpty ? deviceHost : theme.hostName, banner: banner,
         bannerNarrow: narrow, greeting: theme.greeting, directory: directory, rows: theme.rows,
         cols: theme.cols)
+      shell.onConfig = { [weak self] in self?.showConfig() }
       let session = try Session(
         transport: shell, rows: theme.rows, cols: theme.cols, history: theme.history)
       theme.apply { session.configure(color: $0, rgb: $1) }
@@ -504,6 +505,21 @@
           v.apply(theme)
         }
       }
+    }
+
+    /// The settings screen; what it types goes to the session in front.
+    func showConfig() {
+      guard presentedViewController == nil else { return }
+      let config = ConfigController(
+        ssh: Theme.home.appendingPathComponent(".ssh"),
+        run: { [weak self] line in
+          guard let self, self.views.indices.contains(self.current) else { return }
+          self.views[self.current].session.send(line)
+        },
+        reload: { [weak self] in self?.reloadConfig() })
+      let nav = UINavigationController(rootViewController: config)
+      nav.modalPresentationStyle = .formSheet
+      present(nav, animated: true)
     }
 
     /// init.filo again, for every window: what it changes shows now.

@@ -41,6 +41,10 @@ extension Theme {
     ;; overrides the built-in default. Booleans are #t and #f; colors are
     ;; "#rrggbb". Uncomment and edit as needed:
     ;;
+    ;; settings.filo, beside this file, is what the config screen writes
+    ;; (`config` in the shell, on iPad and iPhone). It runs first: what this
+    ;; file sets wins over it.
+    ;;
     ;; (set FontName "3270-Regular") ; PostScript name; Menlo when missing
     ;; (set FontSize 25)             ; points (default 25 on the Mac, 18 on iOS)
     ;; (set Rows 25)                 ; size of a new window
@@ -69,7 +73,7 @@ extension Theme {
     ;;                               ; it fits; any text or ANSI art; "" for none
     ;; (set BannerNarrow "~/.config/fosforo/banner-narrow.ans") ; in its place
     ;;                               ; when it does not fit; "" for none
-    ;; (set Greeting "help      the commands, what each does\\nedt FILE  ...")
+    ;; (set Greeting "help      what each command does\\nedt FILE  ...")
     ;;                               ; lines under it, on any screen, "\\n"
     ;;                               ; between them; "" for none
     ;;
@@ -157,8 +161,9 @@ extension Theme {
   /// themes go in themes/ when there is no such directory yet.
   public static func load(from url: URL = configURL) throws -> Theme {
     let (source, themes) = try prepare(url)
+    let base = try settings(beside: url, themes: themes)
     do {
-      return try parse(source, themes: themes)
+      return try parse(source, themes: themes, base: base)
     } catch let e as ConfigError {
       throw ConfigError(description: "\(url.path): \(e.description)")
     }
@@ -167,8 +172,9 @@ extension Theme {
   /// As load, keeping the interpreter for the on-* hooks.
   public static func open(from url: URL = configURL) throws -> (Theme, Hooks) {
     let (source, themes) = try prepare(url)
+    let base = try settings(beside: url, themes: themes)
     do {
-      return try Hooks.open(source, themes: themes)
+      return try Hooks.open(source, themes: themes, base: base)
     } catch let e as ConfigError {
       throw ConfigError(description: "\(url.path): \(e.description)")
     }
@@ -199,10 +205,25 @@ extension Theme {
     return (try String(contentsOf: url, encoding: .utf8), themes)
   }
 
-  /// themes: where (theme "name") finds name.filo; nil, none.
-  public static func parse(_ source: String, themes: URL? = nil) throws -> Theme {
+  /// settings.filo beside init.filo, what the config screen writes: run
+  /// first, so init.filo starts from it and what init.filo sets wins.
+  static func settings(beside url: URL, themes: URL?) throws -> Theme {
+    let file = url.deletingLastPathComponent().appendingPathComponent("settings.filo")
+    guard let source = try? String(contentsOf: file, encoding: .utf8) else { return Theme() }
+    do {
+      return try parse(source, themes: themes)
+    } catch let e as ConfigError {
+      throw ConfigError(description: "\(file.path): \(e.description)")
+    }
+  }
+
+  /// themes: where (theme "name") finds name.filo; nil, none. base: the
+  /// values the script starts from.
+  public static func parse(_ source: String, themes: URL? = nil, base: Theme = Theme()) throws
+    -> Theme
+  {
     let keys = Theme.keys()
-    var vars = variables(keys, of: Theme())
+    var vars = variables(keys, of: base)
     defer { freeNames(vars) }
     let bytes = Array(source.utf8)
     var err = [CChar](repeating: 0, count: 512)
@@ -238,7 +259,7 @@ extension Theme {
         sysctlbyname("hw.machine", nil, &size, nil, 0)
         var name = [CChar](repeating: 0, count: size)
         sysctlbyname("hw.machine", &name, &size, nil, 0)
-        model = String(cString: name)
+        model = cString(name)
       }
       return model.hasPrefix("iPad") ? "ipad" : "iphone"
     #else

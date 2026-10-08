@@ -84,6 +84,6 @@ for r in range(ART_ROWS):
         line += ch
     out.append(line + "\x1b[0m")
 out.append("")
-out.append("\x1b[2m  Gohan, asleep on the job · this greeting")  # 42 columns
-out.append("  is ~/.config/fosforo/banner-narrow.ans\x1b[0m")
+out.append("\x1b[2m  Gohan, asleep on the job \u00b7")  # 38 columns at most
+out.append("  ~/.config/fosforo/banner-narrow.ans\x1b[0m")
 open(dst, "w", encoding="utf-8").write("\r\n".join(out) + "\r\n")  # as banner.ans ends

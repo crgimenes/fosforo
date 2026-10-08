@@ -31,6 +31,8 @@ if [ -z "$profile" ]; then
         security cms -D -i "$f" >"$tmp/profile.plist" 2>/dev/null || continue
         id=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" "$tmp/profile.plist")
         team=$(/usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" "$tmp/profile.plist")
+        # an App Store profile lists no devices and installs on none
+        /usr/libexec/PlistBuddy -c "Print :ProvisionedDevices" "$tmp/profile.plist" >/dev/null 2>&1 || continue
         if [ "$id" = "$team.$bundle" ] || [ "$id" = "$team.*" ]; then
             profile=$f
             break

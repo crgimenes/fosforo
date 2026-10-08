@@ -22,3 +22,12 @@ xcuserdata/
 # built by make xcframework
 swift/Frameworks/
 .claude/
+
+# signing and store material: never in the repository, wherever it lands
+*.mobileprovision
+*.provisionprofile
+*.p8
+*.p12
+*.cer
+*.ipa
+*.xcarchive/

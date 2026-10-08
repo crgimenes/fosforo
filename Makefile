@@ -21,7 +21,7 @@ LIB_OBJ = $(patsubst %.c,build/obj/%.o,$(notdir $(C_SRC)))
 # must match platforms in swift/Package.swift
 LIB_FLAGS = -O2 $(FLAGS) -mmacosx-version-min=14.0
 
-.PHONY: release ios-sim ios-device xcframework roc-host all lib test bench fuzz fmt fmt-check tidy check qa clean swift-fmt swift-build swift-test app install
+.PHONY: release ios-sim ios-device ios-store xcframework roc-host all lib test bench fuzz fmt fmt-check tidy check qa clean swift-fmt swift-build swift-test app install
 
 all: build/vtdump lib roc-host
 
@@ -184,6 +184,11 @@ ios-sim: xcframework icons
 # installs on the paired iPhone/iPad; DEVICE=name picks one (tools/ios-device.sh -h)
 ios-device: xcframework icons
 	FONT_3270="$(FONT_3270)" tools/ios-device.sh
+
+# the App Store build, signed for distribution, in build/fosforo.ipa; PROFILE
+# names the App Store provisioning profile (tools/ios-store.sh -h)
+ios-store: xcframework icons
+	FONT_3270="$(FONT_3270)" tools/ios-store.sh
 
 qa: all fmt-check test tidy check swift-fmt swift-build swift-test
 

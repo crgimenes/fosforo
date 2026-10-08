@@ -9,10 +9,12 @@ import UniformTypeIdentifiers
 // usage: swift tools/gen_icon.swift OUTDIR
 
 func kamon(size: Int, rounded: Bool) -> CGImage {
+  // iOS's square is opaque, and the App Store refuses an icon with alpha
+  let alpha: CGImageAlphaInfo = rounded ? .premultipliedLast : .noneSkipLast
   let ctx = CGContext(
     data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
     space: CGColorSpace(name: CGColorSpace.sRGB)!,
-    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    bitmapInfo: alpha.rawValue)!
   let s = CGFloat(size)
   // the macOS shape: 824 of 1024 points, corners at 185/824 of the side
   let side = rounded ? s * 824 / 1024 : s

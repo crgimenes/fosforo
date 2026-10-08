@@ -49,6 +49,8 @@
     weak var inputDelegate: UITextInputDelegate?
     lazy var tokenizer: UITextInputTokenizer = UITextInputStringTokenizer(textInput: self)
     private var panCarry: CGFloat = 0
+    private var coastSpeed: CGFloat = 0  // points a second, after a flick
+    private var coastLink: CADisplayLink?
     private var sideways = false  // the drag's axis, fixed when it starts
     private var swipeX: CGFloat = 0
     static let swipeDistance: CGFloat = 60
@@ -136,6 +138,7 @@
     /// The display link and the timer hold the view: without this a closed
     /// session would keep drawing, and its connection open.
     func stop() {
+      stopCoasting()
       link?.invalidate()
       link = nil
       blink?.invalidate()
@@ -233,6 +236,7 @@
     /// wheel does on the Mac.
     @objc private func panned(_ g: UIPanGestureRecognizer) {
       if g.state == .began {
+        stopCoasting()
         let v = g.velocity(in: self)
         sideways = abs(v.x) > abs(v.y)
         swipeX = 0
@@ -246,9 +250,18 @@
         }
         return
       }
-      let scale = window?.screen.scale ?? UIScreen.main.scale
-      panCarry += g.translation(in: self).y / (CGFloat(renderer.metrics.height) / scale)
+      move(by: g.translation(in: self).y)
       g.setTranslation(.zero, in: self)
+      if g.state == .ended {
+        coast(from: g.velocity(in: self).y)
+      }
+    }
+
+    /// A finger's travel in points, as lines: the screen of a program that
+    /// owns it (less, vim) gets arrows, the shell's history scrolls.
+    private func move(by points: CGFloat) {
+      let scale = window?.screen.scale ?? UIScreen.main.scale
+      panCarry += points / (CGFloat(renderer.metrics.height) / scale)
       let lines = Int(panCarry)
       guard lines != 0 else { return }
       panCarry -= CGFloat(lines)
@@ -262,8 +275,34 @@
       vp.scroll(by: lines)
     }
 
+    /// After a flick the text goes on and slows as a UIScrollView does
+    /// (its normal deceleration, 0.998 a millisecond); a slow release stops.
+    private func coast(from speed: CGFloat) {
+      guard abs(speed) > 200 else { return }
+      coastSpeed = speed
+      let l = CADisplayLink(target: self, selector: #selector(coasting(_:)))
+      l.add(to: .main, forMode: .common)
+      coastLink = l
+    }
+
+    @objc private func coasting(_ l: CADisplayLink) {
+      let dt = CGFloat(l.targetTimestamp - l.timestamp)
+      move(by: coastSpeed * dt)
+      coastSpeed *= pow(0.998, dt * 1000)
+      if abs(coastSpeed) < 20 {
+        stopCoasting()
+      }
+    }
+
+    private func stopCoasting() {
+      coastLink?.invalidate()
+      coastLink = nil
+      coastSpeed = 0
+    }
+
     /// Any key brings the view back to the live screen, cursor lit.
     private func live() {
+      stopCoasting()
       renderer.typed()
       dirty = true
       vp.live()
@@ -340,6 +379,7 @@
     }
 
     @objc private func tapped(_ g: UITapGestureRecognizer) {
+      stopCoasting()  // a touch stops a flick, as anywhere in iOS
       let p = grid(g.location(in: self))
       let row = (p.y - renderer.inset.y) / renderer.metrics.height
       if renderer.statusBar && row >= screen.rows {

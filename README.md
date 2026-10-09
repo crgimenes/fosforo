@@ -2,8 +2,8 @@
 
 A terminal emulator for macOS, iPadOS and iOS. MIT.
 
-On the Mac it is a terminal and nothing else: your login shell on a pty, the
-system's ssh and git. On the iPad and iPhone the shell is
+On the Mac it is a fast terminal made for developers: your login shell on a
+pty, with the system's ssh and git. On the iPad and iPhone the shell is
 [rocchetto](https://github.com/crgimenes/rocchetto), built in, with the
 app's own SSH and Mosh clients behind the `ssh` and `mosh` commands. The
 same C core and Metal renderer draw both.

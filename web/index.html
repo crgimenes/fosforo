@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fosforo — a terminal for macOS, iPadOS and iOS</title>
+<meta name="description" content="A terminal emulator for macOS, iPadOS and iOS, in C and Swift, drawn with Metal. On the iPad and iPhone: a built-in shell, SSH and Mosh, keys guarded by the Secure Enclave. MIT.">
+<meta property="og:title" content="fosforo — a terminal for macOS, iPadOS and iOS">
+<meta property="og:description" content="A terminal emulator in C and Swift, drawn with Metal. Built-in shell, SSH and Mosh on the iPad and iPhone. MIT.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://crgimenes.github.io/fosforo/">
+<meta property="og:image" content="https://crgimenes.github.io/fosforo/ipad-1-shell.jpg">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Ccircle cx='100' cy='100' r='95' fill='white'/%3E%3Ccircle cx='100' cy='100' r='90' fill='black'/%3E%3Ccircle cx='100' cy='100' r='70' fill='white'/%3E%3Cg fill='black'%3E%3Ccircle cx='70' cy='130' r='12'/%3E%3Ccircle cx='100' cy='70' r='12'/%3E%3Ccircle cx='100' cy='130' r='12'/%3E%3Ccircle cx='130' cy='100' r='12'/%3E%3Ccircle cx='130' cy='130' r='12'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+/* 3270-Regular.otf is copied from assets/fonts by the Pages workflow, so the
+   repository keeps one copy of it; without the file the page falls back to
+   the system monospace. */
+@font-face {
+  font-family: "IBM 3270";
+  src: url("3270-Regular.otf") format("opentype");
+  font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  --bg: #000;
+  --panel: #0d0f0d;
+  --line: #1f251f;
+  --fg: #e4e7e4;
+  --dim: #8f988f;
+  --accent: #33ff66;
+  --link: #56c8d8;
+  --mono: "IBM 3270", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 2.5rem 16px 3rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; }
+a { color: var(--link); }
+header { display: flex; align-items: center; gap: 1.25rem; }
+header svg { width: 72px; height: 72px; flex: none; }
+h1 {
+  font: 3rem/1 var(--mono);
+  margin: 0;
+  color: var(--accent);
+  text-shadow: 0 0 6px rgba(51, 255, 102, .55), 0 0 18px rgba(51, 255, 102, .25);
+}
+.tagline { color: var(--dim); margin: .35rem 0 0; }
+h2 {
+  font: 1.5rem/1.2 var(--mono);
+  color: var(--accent);
+  margin: 3rem 0 .75rem;
+}
+p, ul { max-width: 68ch; }
+li { margin: .2rem 0; }
+code, pre { font-family: ui-monospace, Menlo, monospace; font-size: .9em; }
+pre {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .8rem 1rem;
+  overflow-x: auto;
+  max-width: 68ch;
+}
+pre .p { color: var(--dim); user-select: none; }
+.get { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.get div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.25rem; }
+.get h3 { margin: 0 0 .4rem; font-size: 1rem; }
+.get p { margin: .4rem 0; color: var(--dim); font-size: .95rem; }
+.get pre { margin: .5rem 0; }
+.shots { display: flex; gap: 1rem; overflow-x: auto; padding-bottom: .5rem; margin-top: 1rem; }
+.shots img {
+  height: 520px;
+  max-height: 70vh;
+  width: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  flex: none;
+}
+footer { margin-top: 3.5rem; color: var(--dim); font-size: .9rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+@media (max-width: 560px) {
+  h1 { font-size: 2.3rem; }
+  header svg { width: 56px; height: 56px; }
+  .shots img { height: 420px; }
+}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <svg viewBox="0 0 200 200" role="img" aria-label="fosforo kamon">
+    <circle cx="100" cy="100" r="95" fill="#fff"/>
+    <circle cx="100" cy="100" r="90" fill="#000"/>
+    <circle cx="100" cy="100" r="70" fill="#fff"/>
+    <g fill="#000">
+      <circle cx="70" cy="130" r="12"/><circle cx="100" cy="70" r="12"/>
+      <circle cx="100" cy="130" r="12"/><circle cx="130" cy="100" r="12"/>
+      <circle cx="130" cy="130" r="12"/>
+    </g>
+  </svg>
+  <div>
+    <h1>fosforo</h1>
+    <p class="tagline">A terminal for macOS, iPadOS and iOS. C and Swift, drawn with Metal. MIT.</p>
+  </div>
+</header>
+
+<div class="get">
+  <div>
+    <h3>Mac</h3>
+    <p>Apple silicon and Intel, macOS 14 or later. Signed and notarized.</p>
+<pre><code><span class="p">$ </span>brew install --cask crgimenes/tap/fosforo</code></pre>
+    <p>Or the zip from the <a href="https://github.com/crgimenes/fosforo/releases/latest">latest release</a>: unzip and move fosforo.app to Applications.</p>
+  </div>
+  <div>
+    <h3>iPad and iPhone</h3>
+    <p>On its way to the App Store.</p>
+    <p>Source, issues and build instructions on <a href="https://github.com/crgimenes/fosforo">GitHub</a>.</p>
+  </div>
+</div>
+
+<div class="shots">
+  <img src="ipad-1-shell.jpg" alt="fosforo on the iPad: the greeting, the commands in /bin and a pipeline" loading="lazy">
+  <img src="iphone-3-ssh-htop.jpg" alt="fosforo on the iPhone: htop over SSH" loading="lazy">
+  <img src="iphone-1-shell.jpg" alt="fosforo on the iPhone: pipelines in the built-in shell" loading="lazy">
+  <img src="ipad-2-corewar.jpg" alt="Core War on the iPad, three warriors and their code" loading="lazy">
+  <img src="iphone-2-corewar.jpg" alt="Core War on the iPhone, Paper against Scanner" loading="lazy">
+</div>
+
+<h2>On the Mac</h2>
+<p>A fast terminal made for developers: your login shell on a pty, with the system's ssh and git.</p>
+<ul>
+  <li>Several sessions per window, ⌘T, ⌘1–9, a two-finger swipe to switch.</li>
+  <li>A status bar with the session, the directory and git branch, or <code>ssh user@host</code>.</li>
+  <li>Search in the scrollback (⌘F), copy mode (⇧⌘C), jumps between prompts (⌘↑/⌘↓).</li>
+  <li>OSC 8 links, OSC 52 clipboard, OSC 9 and 777 notifications, OSC 133 prompt marks.</li>
+</ul>
+
+<h2>On the iPad and iPhone</h2>
+<p>The shell is <a href="https://github.com/crgimenes/rocchetto">rocchetto</a>, built into the app: pipes, redirects, functions, history and sixty-odd commands, offline, with no account and no server.</p>
+<ul>
+  <li><code>ssh</code> and <code>mosh</code> are the app's own clients: <code>~/.ssh/config</code>, ProxyJump, port forwarding, agent forwarding.</li>
+  <li><code>ssh-keygen</code> and <code>ssh-copy-id</code>, as on a computer.</li>
+  <li>Private keys can be encrypted by a key in the device's Secure Enclave, opened with Face ID, Touch ID or the passcode.</li>
+  <li>A key bar over the on-screen keyboard; full hardware keyboard support on the iPad.</li>
+  <li><code>~/iCloud</code> is the app's iCloud Drive folder; files come in from the Files app.</li>
+</ul>
+
+<h2>Both</h2>
+<ul>
+  <li>Full-screen programs such as vim, tmux and htop render as they should.</li>
+  <li>Box drawing, blocks, braille and Powerline glyphs are drawn from geometry, so ANSI art has no seams.</li>
+  <li>IBM 3270 is the default font; Japanese, Chinese and color emoji come from the system.</li>
+  <li>Configuration, themes and hooks are <a href="https://github.com/crgimenes/clang_filo">Filo</a> scripts in <code>~/.config/fosforo/init.filo</code>.</li>
+</ul>
+<pre><code>(set on-blur (fn (arg) (theme "phosphor")))
+(set on-focus (fn (arg) (theme "default")))</code></pre>
+
+<h2 id="privacy">Privacy</h2>
+<p>fosforo collects no data. It has no analytics, no crash reporting, no advertising and no accounts, and it sends nothing to its author or to anyone else.</p>
+<p>What you type, your files and your keys stay on your device. Files you put in the app's iCloud Drive folder are stored in your own iCloud account. The app connects only to the machines you name, or that a program you run asks for. Removing the app removes everything it stored on the device.</p>
+<p>Questions: <a href="https://github.com/crgimenes/fosforo/issues">open an issue</a>.</p>
+
+<footer>
+  © 2026 Cesar Gimenes · MIT · IBM 3270 font, BSD-3-Clause ·
+  <a href="https://github.com/crgimenes/fosforo">github</a> ·
+  <a href="https://crg.eti.br/projects/fosforo/">crg.eti.br</a>
+</footer>
+
+</main>
+</body>
+</html>

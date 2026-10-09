@@ -8,6 +8,30 @@ pty, with the system's ssh and git. On the iPad and iPhone the shell is
 app's own SSH and Mosh clients behind the `ssh` and `mosh` commands. The
 same C core and Metal renderer draw both.
 
+## Install
+
+macOS 14 or later, Apple silicon or Intel. With Homebrew:
+
+```sh
+brew install --cask crgimenes/tap/fosforo
+```
+
+`brew upgrade --cask fosforo` brings the next release.
+
+Or by hand: download `fosforo-macos.zip` from the
+[latest release](https://github.com/crgimenes/fosforo/releases/latest),
+unzip it and move `fosforo.app` to `/Applications`. The app is signed and
+notarized, so it opens with no Gatekeeper warning. From the terminal:
+
+```sh
+curl -LO https://github.com/crgimenes/fosforo/releases/latest/download/fosforo-macos.zip
+unzip fosforo-macos.zip
+mv fosforo.app /Applications/
+```
+
+The iPad and iPhone app is on its way to the App Store. To build from
+source, see [Build](#build).
+
 ## Layout
 
 - `vt/` — the terminal core in C11: VT parser, cell grid with scrollback

@@ -6,6 +6,7 @@
   import QuartzCore
   import AudioToolbox
   import GameController
+  import PencilKit
   import UIKit
 
   /// The terminal on iOS: the same renderer as the Mac, keys from the
@@ -58,6 +59,7 @@
     /// A sideways swipe: the next session (true) or the previous.
     var onSwipe: ((Bool) -> Void)?
     private var ctrlLatched = false
+    private var altLatched = false
     private var repeatTimer: Timer?
     private var repeating: UIKeyboardHIDUsage?
     private var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
@@ -108,12 +110,15 @@
       addGestureRecognizer(press)
       let secondary = UITapGestureRecognizer(target: self, action: #selector(menuClick(_:)))
       secondary.buttonMaskRequired = .secondary  // a right click: the touch menu
+      secondary.allowedTouchTypes = pointer  // the mask means nothing to a finger: any tap
       addGestureRecognizer(secondary)
       addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:))))
       addInteraction(editMenu)
+      addInteraction(UIScribbleInteraction(delegate: self))  // to say no (below)
       // the text system's undo/redo/paste strip means nothing in a terminal
       inputAssistantItem.leadingBarButtonGroups = []
       inputAssistantItem.trailingBarButtonGroups = []
+      placeKeys()
       keyboardTop.isHidden = true
       keyboardTop.translatesAutoresizingMaskIntoConstraints = false
       addSubview(keyboardTop)
@@ -127,9 +132,20 @@
         NotificationCenter.default.addObserver(
           self, selector: #selector(keyboardsChanged(_:)), name: name, object: nil)
       }
+      // the Pencil on the terminal is there to draw (no Scribble: its
+      // palette took the bar): a press of no length fires on touch-down
+      let pencil = UILongPressGestureRecognizer(target: self, action: #selector(pencilDown(_:)))
+      pencil.minimumPressDuration = 0
+      pencil.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+      pencil.cancelsTouchesInView = false
+      addGestureRecognizer(pencil)
       let twoFingers = UITapGestureRecognizer(target: self, action: #selector(twoFingerTap))
       twoFingers.numberOfTouchesRequired = 2
       addGestureRecognizer(twoFingers)
+      // ours (the interactions' come with their own delegate): not on the footer
+      for g in gestureRecognizers ?? [] where g.delegate == nil {
+        g.delegate = self
+      }
     }
 
     @available(*, unavailable)
@@ -344,6 +360,7 @@
         renderer.shift = (at - under * z).clamped(
           lowerBound: view * (1 - z), upperBound: SIMD2(0, 0))
         pinchAt = at
+        zoomed()
         dirty = true
       default:
         break
@@ -394,7 +411,213 @@
       if vp.hasSelection {
         vp.clearSelection()
       }
-      becomeFirstResponder()
+      enter(.keyboard)
+    }
+
+    // MARK: - the keyboard or the Pencil
+
+    /// Which the terminal is for. The mode is ours, changed only by what
+    /// the user does to us (a finger's tap, the Pencil, a key); the system
+    /// keyboard follows from the focus and is never read back. Text is the
+    /// iPad's handwriting (Scribble): the terminal lets go of the focus and
+    /// Scribble takes it when the Pencil writes, with the iPad's palette
+    /// instead of the keyboard (a focus asked for brings the keyboard, from
+    /// whatever touched); our keys leave the bar so as not to lie under the
+    /// palette. The finger brings the keyboard back.
+    private enum Mode { case keyboard, pencil, text }
+    private var mode = Mode.keyboard
+
+    private func enter(_ m: Mode) {
+      if m != .keyboard && !TerminalView.pad {
+        return
+      }
+      let from = mode
+      if m != mode {
+        mode = m
+        if from == .pencil {
+          canvas.drawing = PKDrawing()  // a drawing is of the moment
+          history = []
+        }
+        if let footer {
+          if footer.superview == nil {
+            insertSubview(footer, aboveSubview: canvas)
+          }
+          footer.isHidden = m != .pencil
+        }
+        updateInk()
+        placeKeys()
+        setNeedsLayout()
+      }
+      switch m {
+      case .pencil, .text:
+        resignFirstResponder()
+      case .keyboard:
+        if from == .text {
+          resignFirstResponder()  // Scribble's focus: anew, from the finger, the keyboard
+        }
+        becomeFirstResponder()
+      }
+    }
+
+    @objc private func pencilDown(_ g: UILongPressGestureRecognizer) {
+      guard g.state == .began, mode == .keyboard else { return }
+      enter(.pencil)
+    }
+
+    // MARK: - drawing over the terminal with the Pencil
+
+    /// Ink over the screen, for pointing at things in a capture. The view
+    /// only shows it: touched, PencilKit's view takes the focus (and the
+    /// keyboard with it), so the strokes are made here from the Pencil's
+    /// touches, and the finger keeps scrolling, selecting and pinching the
+    /// terminal; the pinch takes the ink along (zoomed follows the renderer).
+    private lazy var canvas: PKCanvasView = {
+      let c = PKCanvasView(frame: bounds)
+      c.layer.anchorPoint = .zero  // the zoom is about the top left corner
+      c.backgroundColor = .clear
+      c.isOpaque = false
+      c.overrideUserInterfaceStyle = .light  // PencilKit recolors ink for dark: not here
+      c.isUserInteractionEnabled = false
+      addSubview(c)
+      return c
+    }()
+    private var inkTool = 0
+    private var inkColor = 0
+    private var history: [PKDrawing] = []  // before each change, for undo
+    private var stroke: [PKStrokePoint] = []
+    private var strokeStart = Date()
+
+    private var ink: PKInk {
+      let color = KeyBar.colors[inkColor]
+      return inkTool == 1 ? PKInk(.marker, color: color) : PKInk(.pen, color: color)
+    }
+
+    private func pencil(_ touches: Set<UITouch>, _ event: UIEvent?) -> [UITouch] {
+      guard mode == .pencil else { return [] }
+      return touches.filter { $0.type == .pencil }.flatMap {
+        event?.coalescedTouches(for: $0) ?? [$0]
+      }
+    }
+
+    private func add(_ touches: [UITouch]) {
+      for t in touches {
+        let w: CGFloat = inkTool == 1 ? 20 : 4
+        stroke.append(
+          PKStrokePoint(
+            location: t.location(in: canvas),
+            timeOffset: t.timestamp - strokeStart.timeIntervalSince1970,
+            size: CGSize(width: w, height: w), opacity: 1, force: max(0.3, t.force),
+            azimuth: t.azimuthAngle(in: canvas), altitude: t.altitudeAngle))
+      }
+    }
+
+    /// The stroke so far, over the drawing; the eraser leaves no mark.
+    private func preview() -> PKDrawing {
+      guard inkTool != 2, stroke.count > 1 else { return history.last ?? canvas.drawing }
+      var d = history.last ?? canvas.drawing
+      d.strokes.append(
+        PKStroke(ink: ink, path: PKStrokePath(controlPoints: stroke, creationDate: strokeStart)))
+      return d
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+      let p = pencil(touches, event)
+      guard !p.isEmpty else {
+        super.touchesBegan(touches, with: event)
+        return
+      }
+      history.append(canvas.drawing)
+      strokeStart = Date()
+      stroke = []
+      add(p)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+      let p = pencil(touches, event)
+      guard !p.isEmpty else {
+        super.touchesMoved(touches, with: event)
+        return
+      }
+      add(p)
+      canvas.drawing = preview()
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+      let p = pencil(touches, event)
+      guard !p.isEmpty else {
+        super.touchesEnded(touches, with: event)
+        return
+      }
+      add(p)
+      if inkTool == 2 {
+        erase()
+      } else {
+        canvas.drawing = preview()
+      }
+      stroke = []
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+      let p = pencil(touches, event)
+      guard !p.isEmpty else {
+        super.touchesCancelled(touches, with: event)
+        return
+      }
+      canvas.drawing = history.removeLast()
+      stroke = []
+    }
+
+    /// Strokes the eraser passed within reach of go.
+    private func erase() {
+      let reach: CGFloat = 12
+      var d = history.last ?? canvas.drawing
+      d.strokes.removeAll { s in
+        s.path.interpolatedPoints(by: .distance(4)).contains { q in
+          stroke.contains { e in
+            hypot(e.location.x - q.location.x, e.location.y - q.location.y) < reach
+          }
+        }
+      }
+      canvas.drawing = d
+    }
+
+    private func zoomed() {
+      let scale = contentScaleFactor
+      let z = CGFloat(renderer.zoom)
+      canvas.transform = CGAffineTransform(
+        a: z, b: 0, c: 0, d: z, tx: CGFloat(renderer.shift.x) / scale,
+        ty: CGFloat(renderer.shift.y) / scale)
+    }
+
+    private func updateInk() {
+      for b in bars {
+        b.tool = inkTool
+        b.color = inkColor
+      }
+    }
+
+    /// The screen as it shows, ink and all, to the share sheet: Photos,
+    /// AirDrop, Files.
+    private func share() {
+      let scale = contentScaleFactor
+      guard
+        let frame = try? renderer.image(
+          vp.screen, width: Int(bounds.width * scale), height: Int(bounds.height * scale))
+      else { return }
+      let ink = canvas.drawing.image(from: bounds, scale: scale)
+      let picture = UIGraphicsImageRenderer(size: bounds.size).image { _ in
+        UIImage(cgImage: frame, scale: scale, orientation: .up).draw(in: bounds)
+        ink.draw(in: bounds)
+      }
+      let sheet = UIActivityViewController(activityItems: [picture], applicationActivities: nil)
+      sheet.popoverPresentationController?.sourceView = self
+      sheet.popoverPresentationController?.sourceRect = CGRect(
+        x: bounds.midX, y: bounds.maxY, width: 1, height: 1)
+      var top = window?.rootViewController
+      while let next = top?.presentedViewController {
+        top = next
+      }
+      top?.present(sheet, animated: true)
     }
 
     // MARK: - selection: long press picks the word, dragging extends it
@@ -511,17 +734,56 @@
       guard w > 0, h > 0 else { return }
       metalLayer.drawableSize = CGSize(width: w, height: h)
       var safe = safeAreaInsets
-      if #available(iOS 26, *) {
+      if #available(iOS 26, *), let w = window, w.bounds.size != w.screen.bounds.size {
         // a resizable iPad window: its rounded corners and window controls
-        // cost a row at the top, not columns down the side
+        // cost a row at the top, not columns down the side (full screen,
+        // the same for the screen's corners would cost a row at each end)
         safe = edgeInsets(for: .safeArea(cornerAdaptation: .vertical))
       }
-      renderer.inset = SIMD2(Int(safe.left * scale), Int(safe.top * scale))
-      let usableH = Int(
-        (min(keyboardTop.frame.maxY, bounds.height - safe.bottom) - safe.top) * scale)
-      let usableW = Int((bounds.width - safe.left - safe.right) * scale)
-      let (rows, cols) = renderer.gridSize(
-        width: max(usableW, renderer.metrics.width), height: max(usableH, renderer.metrics.height))
+      let keyboardUp = keyboardTop.frame.maxY < bounds.height - safe.bottom - 1
+      var bottom = keyboardUp ? keyboardTop.frame.maxY : bounds.height - safe.bottom
+      var firm = keyboardUp  // a bottom not to go past: the keyboard, the footer
+      if let footer, mode == .pencil {
+        let h = KeyBar.height(traitCollection)
+        footer.frame = CGRect(x: 0, y: bottom - h, width: bounds.width, height: h)
+        bottom -= h
+        firm = true
+      }
+      canvas.layer.position = .zero
+      canvas.bounds = bounds
+      zoomed()
+      // the system's margins are wider than what lies in them (iPadOS 26:
+      // 32 points over a status bar of fewer): a row short by less than half
+      // a row is made whole from them, half each at most, never from the
+      // keyboard; worked out from the margins and the row, not per device
+      let rowPx = renderer.metrics.height
+      let barRows = renderer.statusBar ? 1 : 0
+      let width = max(Int((bounds.width - safe.left - safe.right) * scale), renderer.metrics.width)
+      var topPx = Int(safe.top * scale)
+      var usableH = Int(bottom * scale) - topPx
+      let fit = renderer.gridSize(width: width, height: max(usableH, rowPx))
+      let short = rowPx - (usableH - (fit.rows + barRows) * rowPx)
+      if short * 2 < rowPx {
+        let upMax = topPx / 2
+        let downMax = firm ? 0 : Int(safe.bottom * scale) / 2
+        var down = min(downMax, short / 2)
+        var up = short - down
+        if up > upMax {
+          up = upMax
+          down = short - up
+        }
+        if down <= downMax {
+          topPx -= up
+          usableH += short
+        }
+      }
+      let (rows, cols) = renderer.gridSize(width: width, height: max(usableH, rowPx))
+      if firm {
+        // on the keyboard (or the Pencil's bar) the grid sits on it, and
+        // what is left of a row goes to the top, where it does not show
+        topPx = Int(bottom * scale) - (rows + barRows) * rowPx
+      }
+      renderer.inset = SIMD2(Int(safe.left * scale), topPx)
       if rows != asked.rows || cols != asked.cols {
         asked = (rows, cols)
         session.resize(rows: rows, cols: cols)
@@ -592,10 +854,12 @@
     func insertText(_ text: String) {
       live()
       marked = ""  // the input method's final text replaces what it was composing
-      if ctrlLatched, let cp = text.unicodeScalars.first?.value {
+      if ctrlLatched || altLatched, let cp = text.unicodeScalars.first?.value {
+        let m = (ctrlLatched ? UInt32(VT_MOD_CTRL) : 0) | (altLatched ? UInt32(VT_MOD_ALT) : 0)
         ctrlLatched = false
+        altLatched = false
         updateBar()
-        session.input { t, out in vt_text(t, cp, UInt32(VT_MOD_CTRL), out) }
+        session.input { t, out in vt_text(t, cp, m, out) }
         return
       }
       session.send(text == "\n" ? "\r" : text)
@@ -741,38 +1005,59 @@
 
     // MARK: - key bar over the on-screen keyboard
 
-    private lazy var bar: UIView = makeBar()
-    private var ctrlButton: UIButton?
+    private static let pad = UIDevice.current.userInterfaceIdiom == .pad
+    private lazy var bars: [KeyBar] = {
+      let parts: [KeyBar.Part] = TerminalView.pad ? [.pad, .footer] : [.phone]
+      return parts.map { part in
+        let b = KeyBar(part)
+        b.onKey = { [weak self] in self?.barKey($0) }
+        return b
+      }
+    }()
+    /// The phone's bar over the keyboard.
+    private var bar: KeyBar? { TerminalView.pad ? nil : bars[0] }
+    /// The iPad's bar with its keyboard away, at the foot of the terminal.
+    private var footer: KeyBar? { TerminalView.pad ? bars[1] : nil }
 
-    /// Only for the on-screen keyboard: a hardware one has all of these.
+    /// The iPad's keys go in the keyboard's shortcuts bar, by way of an item
+    /// of no size (KeyHost); none with a hardware keyboard unless asked for.
+    private func placeKeys() {
+      let item = inputAssistantItem
+      let want = TerminalView.pad && mode != .text && GCKeyboard.coalesced == nil
+      guard want == item.trailingBarButtonGroups.isEmpty else { return }
+      item.leadingBarButtonGroups = []
+      item.trailingBarButtonGroups =
+        want
+        ? [
+          UIBarButtonItemGroup(
+            barButtonItems: [UIBarButtonItem(customView: KeyHost(bars[0]))],
+            representativeItem: nil)
+        ] : []
+    }
+
+    /// Only for the on-screen keyboard: a hardware one has all of these,
+    /// and the iPad's minimal bar for it is left to the iPad.
     override var inputAccessoryView: UIView? {
-      GCKeyboard.coalesced == nil || keysWanted ? bar : nil
+      GCKeyboard.coalesced == nil ? bar : nil  // nil on the iPad
     }
-    private var keysWanted = false  // asked for from the context menu
 
-    /// The on-screen keyboard, or with a hardware one only the bar, is up.
+    /// With no hardware keyboard the focus is the on-screen keyboard.
     fileprivate var keyboardShown: Bool {
-      isFirstResponder && (GCKeyboard.coalesced == nil || keysWanted)
+      isFirstResponder && GCKeyboard.coalesced == nil
     }
 
-    /// From the context menu: with a hardware keyboard attached iPadOS keeps
-    /// its own keyboard away, but the bar of extra keys can still come up.
+    /// From the context menu (not offered with a hardware keyboard: iPadOS
+    /// keeps its own keyboard away then).
     fileprivate func toggleKeyboard() {
       if keyboardShown {
-        keysWanted = false
-        if GCKeyboard.coalesced != nil {
-          reloadInputViews()  // the bar goes; typing on the hardware keyboard goes on
-          return
-        }
         resignFirstResponder()
         return
       }
-      keysWanted = true
-      reloadInputViews()
-      becomeFirstResponder()
+      enter(.keyboard)
     }
 
     @objc private func keyboardsChanged(_ note: Notification) {
+      placeKeys()
       reloadInputViews()
       // a keyboard just connected is there to type in the session in front
       if note.name == .GCKeyboardDidConnect, !isHidden, window?.isKeyWindow == true {
@@ -780,100 +1065,58 @@
       }
     }
 
-    private static let allBarKeys: [(String, [UInt8]?)] = [
-      ("esc", [0x1B]), ("ctrl", nil), ("tab", [0x09]), ("←", nil), ("↓", nil), ("↑", nil),
-      ("→", nil), ("|", Array("|".utf8)), ("~", Array("~".utf8)), ("/", Array("/".utf8)),
-      ("-", Array("-".utf8)), ("find", nil),
-    ]
-    /// The iPad's on-screen keyboard has tab and these symbols already;
-    /// the bar carries only what it lacks.
-    private static let barKeys = allBarKeys.filter { key in
-      UIDevice.current.userInterfaceIdiom != .pad || !["tab", "|", "~", "/", "-"].contains(key.0)
-    }
-    private static let arrows: [String: Int32] = [
-      "←": Int32(VT_KEY_LEFT), "↓": Int32(VT_KEY_DOWN), "↑": Int32(VT_KEY_UP),
-      "→": Int32(VT_KEY_RIGHT),
-    ]
-
-    /// Keys of fixed width in a strip that scrolls when the screen is too
-    /// narrow for all of them (a phone), instead of squeezing the labels.
-    private func makeBar() -> UIView {
-      let stack = UIStackView()
-      stack.axis = .horizontal
-      stack.spacing = 4
-      for (title, _) in TerminalView.barKeys {
-        var config = UIButton.Configuration.gray()
-        config.title = title
-        let b = UIButton(
-          configuration: config,
-          primaryAction: UIAction { [weak self] _ in
-            self?.barKey(title)
-          })
-        if title == "ctrl" {
-          ctrlButton = b
+    private func barKey(_ key: KeyBar.Key) {
+      switch key {
+      case .find: showFind()
+      case .keyboard: enter(.keyboard)
+      case .textMode: enter(.text)
+      case .ctrl: ctrlLatched.toggle()
+      case .alt: altLatched.toggle()
+      case .fn:
+        let on = !bars[0].fn
+        for b in bars { b.fn = on }
+      case .hide: toggleKeyboard()
+      case .esc: send(key: Int32(VT_KEY_ESCAPE))
+      case .tab: send(key: Int32(VT_KEY_TAB))
+      case .arrow(let code): send(key: code)
+      case .function(let n): send(key: Int32(VT_KEY_F1) + Int32(n - 1))
+      case .text(let t): insertText(t)
+      case .tool(let i):
+        inkTool = i
+        updateInk()
+      case .color(let i):
+        inkColor = i
+        if inkTool == 2 { inkTool = 0 }  // a color is for drawing, not erasing
+        updateInk()
+      case .undo:
+        if let d = history.popLast() {
+          canvas.drawing = d
         }
-        b.widthAnchor.constraint(greaterThanOrEqualToConstant: 52).isActive = true
-        stack.addArrangedSubview(b)
+      case .clear:
+        history.append(canvas.drawing)
+        canvas.drawing = PKDrawing()
+      case .share: share()
       }
-      let bar = UIInputView(
-        frame: CGRect(x: 0, y: 0, width: 0, height: 44), inputViewStyle: .keyboard)
-      let scroll = UIScrollView()
-      scroll.showsHorizontalScrollIndicator = false
-      scroll.translatesAutoresizingMaskIntoConstraints = false
-      stack.translatesAutoresizingMaskIntoConstraints = false
-      bar.addSubview(scroll)
-      scroll.addSubview(stack)
-      let fill = stack.widthAnchor.constraint(
-        equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -8)
-      fill.priority = .defaultLow  // spread out when there is room, scroll when not
-      NSLayoutConstraint.activate([
-        scroll.leadingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.leadingAnchor),
-        scroll.trailingAnchor.constraint(equalTo: bar.safeAreaLayoutGuide.trailingAnchor),
-        scroll.topAnchor.constraint(equalTo: bar.topAnchor),
-        scroll.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
-        stack.leadingAnchor.constraint(
-          equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 4),
-        stack.trailingAnchor.constraint(
-          equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -4),
-        stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 4),
-        stack.bottomAnchor.constraint(
-          equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -4),
-        stack.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor, constant: -8),
-        fill,
-      ])
-      stack.distribution = .fillEqually
-      return bar
+      updateBar()
     }
 
-    private func barKey(_ title: String) {
-      if title == "find" {
-        showFind()
-        return
-      }
+    /// A key from the bar, with the modifiers latched there, which it uses up.
+    private func send(key code: Int32) {
       live()
-      if title == "ctrl" {
-        ctrlLatched.toggle()
-        updateBar()
-        return
-      }
-      if let code = TerminalView.arrows[title] {
-        session.input { t, out in vt_key(t, code, 0, out) }
-        return
-      }
-      if let bytes = TerminalView.barKeys.first(where: { $0.0 == title })?.1 {
-        if ctrlLatched, bytes.count == 1 {
-          insertText(String(UnicodeScalar(bytes[0])))
-          return
-        }
-        session.send(bytes)
-      }
+      var m: UInt32 = 0
+      if ctrlLatched { m |= UInt32(VT_MOD_CTRL) }
+      if altLatched { m |= UInt32(VT_MOD_ALT) }
+      ctrlLatched = false
+      altLatched = false
+      session.input { t, out in vt_key(t, code, m, out) }
     }
 
-    /// The latched ctrl shows as a filled key until the next character uses it.
+    /// The latched modifiers show lit on the bar until a key uses them.
     private func updateBar() {
-      var config = ctrlLatched ? UIButton.Configuration.filled() : UIButton.Configuration.gray()
-      config.title = "ctrl"
-      ctrlButton?.configuration = config
+      for b in bars {
+        b.ctrl = ctrlLatched
+        b.alt = altLatched
+      }
     }
 
     /// Cmd+N stays here: the scene system, not the menu, makes windows.
@@ -1074,6 +1317,33 @@
     func characterRange(at point: CGPoint) -> UITextRange? { nil }
   }
 
+  /// In Pencil mode the Pencil is the canvas's and the footer's keys are
+  /// their own: our gestures take the finger, on the terminal.
+  extension TerminalView: UIGestureRecognizerDelegate {
+    func gestureRecognizer(
+      _ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch
+    ) -> Bool {
+      guard mode == .pencil else { return true }
+      if touch.type == .pencil {
+        return false
+      }
+      guard let footer, let v = touch.view else { return true }
+      return !v.isDescendant(of: footer)
+    }
+  }
+
+  /// iPadOS writes with the Pencil into any text input unless told not
+  /// to: here the Pencil draws, and Scribble would take its touches and
+  /// the focus (the keyboard's bar under the drawing bar), except in text
+  /// mode, which is Scribble's.
+  extension TerminalView: UIScribbleInteractionDelegate {
+    func scribbleInteraction(
+      _ interaction: UIScribbleInteraction, shouldBeginAt location: CGPoint
+    ) -> Bool {
+      mode == .text
+    }
+  }
+
   extension TerminalView: @preconcurrency UIEditMenuInteractionDelegate {
     func editMenuInteraction(
       _ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
@@ -1085,9 +1355,14 @@
         UIAction(title: "Find") { [weak self] _ in self?.showFind() },
         UIAction(title: "Copy Mode") { [weak self] _ in self?.copyMode() },
         UIAction(title: "Clear Buffer") { [weak self] _ in self?.clearBuffer() },
-        UIAction(title: keyboardShown ? "Hide Keyboard" : "Show Keyboard") { [weak self] _ in
-          self?.toggleKeyboard()
-        },
+      ]
+      if GCKeyboard.coalesced == nil {
+        items.append(
+          UIAction(title: keyboardShown ? "Hide Keyboard" : "Show Keyboard") { [weak self] _ in
+            self?.toggleKeyboard()
+          })
+      }
+      items += [
         UIAction(title: "New Session") { [weak self] _ in
           UIApplication.shared.sendAction(
             #selector(TerminalController.newSession), to: nil, from: self, for: nil)

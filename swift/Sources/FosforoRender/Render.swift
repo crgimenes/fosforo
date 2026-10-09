@@ -481,10 +481,8 @@ public final class Renderer {
     return out
   }
 
-  /// Offscreen frame as a PNG: the window's renderer, checkable from a script.
-  public func snapshot(_ screen: Screen, to path: String) throws {
-    let width = screen.cols * metrics.width
-    let height = (screen.rows + (statusBar ? 1 : 0)) * metrics.height
+  /// Offscreen frame as an image, the size of the drawable it stands for.
+  public func image(_ screen: Screen, width: Int, height: Int) throws -> CGImage {
     let px = try pixels(screen, width: width, height: height)
     let info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
     guard let provider = CGDataProvider(data: Data(px) as CFData),
@@ -492,7 +490,19 @@ public final class Renderer {
         width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
         bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
         bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider, decode: nil,
-        shouldInterpolate: false, intent: .defaultIntent),
+        shouldInterpolate: false, intent: .defaultIntent)
+    else {
+      throw RenderError(description: "image")
+    }
+    return image
+  }
+
+  /// Offscreen frame as a PNG: the window's renderer, checkable from a script.
+  public func snapshot(_ screen: Screen, to path: String) throws {
+    let width = screen.cols * metrics.width
+    let height = (screen.rows + (statusBar ? 1 : 0)) * metrics.height
+    let image = try image(screen, width: width, height: height)
+    guard
       let dest = CGImageDestinationCreateWithURL(
         URL(fileURLWithPath: path) as CFURL, UTType.png.identifier as CFString, 1, nil)
     else {

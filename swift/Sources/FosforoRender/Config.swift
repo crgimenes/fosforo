@@ -156,6 +156,29 @@ extension Theme {
 
     """
 
+  static let sunTheme = """
+    ;; sol: black on white, for a screen in the sun. (theme "sol")
+    (set Foreground "#000000")
+    (set Background "#ffffff")
+    (set Bold "#000000")
+    (set Cursor "#000000")
+    (set Selection "#b5d5ff")
+    (set SelectionText "#000000")
+    (set Match "#ffcc33")
+    (set MatchText "#000000")
+    (set StatusBackground "#d8d8d8")
+    ;; dark enough to read on white; the brights a shade stronger
+    (set Color0 "#000000") (set Color8 "#555555")
+    (set Color1 "#b21818") (set Color9 "#d01b1b")
+    (set Color2 "#11780e") (set Color10 "#16930f")
+    (set Color3 "#8a6a00") (set Color11 "#a07a00")
+    (set Color4 "#1a3fb8") (set Color12 "#2552d8")
+    (set Color5 "#9a1fa0") (set Color13 "#b528bd")
+    (set Color6 "#0d7480") (set Color14 "#0f8a98")
+    (set Color7 "#bbbbbb") (set Color15 "#ffffff")
+
+    """
+
   /// Reads the config file, writing the documented default on first run
   /// (and the default banner beside it, from the app's bundle). Sample
   /// themes go in themes/ when there is no such directory yet.
@@ -201,6 +224,12 @@ extension Theme {
         to: themes.appendingPathComponent("default.filo"), atomically: true, encoding: .utf8)
       try phosphorTheme.write(
         to: themes.appendingPathComponent("phosphor.filo"), atomically: true, encoding: .utf8)
+    }
+    // came later than the others: written where it is missing, never over
+    // a file of that name
+    let sun = themes.appendingPathComponent("sol.filo")
+    if !FileManager.default.fileExists(atPath: sun.path) {
+      try? sunTheme.write(to: sun, atomically: true, encoding: .utf8)
     }
     return (try String(contentsOf: url, encoding: .utf8), themes)
   }

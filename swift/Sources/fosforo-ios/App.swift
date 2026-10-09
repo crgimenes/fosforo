@@ -468,14 +468,20 @@
       try? add(directory: (front?.session.transport as? ShellSwitch)?.directory)
     }
 
-    /// The last session stays: a window with no terminal has nothing to show.
+    /// A window with no terminal has nothing to show: the last session is
+    /// replaced by a new shell.
     @objc func closeSession() {
-      guard views.count > 1 else { return }
-      let v = views.remove(at: current)
+      guard views.indices.contains(current) else { return }
+      let v = views[current]
+      if views.count == 1 {
+        try? add()
+      }
+      guard let i = views.firstIndex(where: { $0 === v }) else { return }
+      views.remove(at: i)
       v.stop()
       v.removeFromSuperview()
       Hooks.fire("close")
-      show(min(current, views.count - 1))
+      show(min(i < current ? current - 1 : current, views.count - 1))
     }
 
     /// exit in the shell: the session closes; the last one closes the

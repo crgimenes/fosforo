@@ -155,7 +155,8 @@ public enum GitBranch {
     // the moment a commit, push, fetch or pull moves either one
     let tips = (local ?? "") + " " + (remote ?? "")
     guard let local, let remote else {
-      return (name, true, gitDir.path, tips)
+      // with no remote at all there is nowhere to push: nothing pending
+      return (name, hasRemote(common), gitDir.path, tips)
     }
     return (name, local != remote, gitDir.path, tips)
   }
@@ -175,6 +176,17 @@ public enum GitBranch {
       return String(line.prefix { $0 != " " })
     }
     return nil
+  }
+
+  private static func hasRemote(_ common: URL) -> Bool {
+    guard
+      let config = try? String(contentsOf: common.appendingPathComponent("config"), encoding: .utf8)
+    else {
+      return false
+    }
+    return config.split(separator: "\n").contains {
+      $0.trimmingCharacters(in: .whitespaces).hasPrefix("[remote ")
+    }
   }
 
   /// refs/remotes/REMOTE/BRANCH from the [branch "name"] section of config.

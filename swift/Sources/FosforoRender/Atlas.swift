@@ -227,18 +227,21 @@ final class Atlas {
     return (face, glyphs[0])
   }
 
-  /// Emoji scaled to the cell's height and centred in its width, into rgba
-  /// (premultiplied).
+  /// Emoji scaled to fit the slot and centred, into rgba (premultiplied).
+  /// One cell wide (U+2620 and other text-default runes) it shrinks to the
+  /// cell's width instead of losing its right half.
   private func rasterizeColor(_ face: CTFont, _ glyph: CGGlyph, width: Int, height: Int) {
     for i in 0..<(width * height * 4) {
       rgba[i] = 0
     }
     let tall = CTFontGetAscent(face) + CTFontGetDescent(face)
-    let fitted = CTFontCreateCopyWithAttributes(
-      face, CTFontGetSize(face) * CGFloat(height) / tall, nil, nil)
     var g = glyph
     var advance = CGSize.zero
-    CTFontGetAdvancesForGlyphs(fitted, .horizontal, &g, &advance, 1)
+    CTFontGetAdvancesForGlyphs(face, .horizontal, &g, &advance, 1)
+    let k = min(
+      CGFloat(height) / tall, advance.width > 0 ? CGFloat(width) / advance.width : .infinity)
+    let fitted = CTFontCreateCopyWithAttributes(face, CTFontGetSize(face) * k, nil, nil)
+    advance.width *= k
     rgba.withUnsafeMutableBytes { raw in
       guard
         let ctx = CGContext(
@@ -249,7 +252,8 @@ final class Atlas {
         return
       }
       var position = CGPoint(
-        x: max(0, (CGFloat(width) - advance.width) / 2), y: CTFontGetDescent(fitted))
+        x: max(0, (CGFloat(width) - advance.width) / 2),
+        y: CTFontGetDescent(fitted) + (CGFloat(height) - tall * k) / 2)
       CTFontDrawGlyphs(fitted, &g, &position, 1, ctx)
     }
   }

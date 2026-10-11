@@ -373,6 +373,30 @@ func nerdFontIconsComeFromTheSymbolsFont() throws {
   #expect(f.all(row: 0, cols: 2, 6, 0x000000))
 }
 
+/// An emoji one cell wide (U+2620 is text-default, width 1) shrinks into
+/// the cell: clipped, its ink would run to the cell's right edge from top to
+/// bottom.
+@Test func narrowEmojiFitsItsCell() throws {
+  var theme = Theme()
+  theme.fontSize = 25
+  let r = try Renderer(theme: theme, scale: 2)
+  let term = try Terminal(rows: 1, cols: 2, history: 0)
+  theme.apply { term.configure(color: $0, rgb: $1) }
+  term.write("\u{2620}\u{FE0F}")
+  var s = Screen()
+  term.snapshot(into: &s)
+  let (w, h) = (r.metrics.width, r.metrics.height)
+  let px = try r.pixels(s, width: 2 * w, height: h, cursorVisible: false)
+  func lit(_ x: Int, _ y: Int) -> Bool {
+    let i = (y * 2 * w + x) * 4
+    return px[i] != 0 || px[i + 1] != 0 || px[i + 2] != 0
+  }
+  let edge = (0..<h).filter { lit(w - 1, $0) }.count
+  let ink = (0..<h).filter { y in (0..<w).contains { lit($0, y) } }.count
+  #expect(ink > 0)
+  #expect(edge < ink / 2, "\(edge) of \(ink) inked rows reach the right edge")
+}
+
 /// An emoji behaves like text under SGR 8 (hidden) and under the cursor:
 /// invisible leaves the cell blank, a bar or underline cursor shows over it.
 @Test func emojiHidesAndTakesTheCursor() throws {

@@ -609,7 +609,7 @@ private func rowText(_ row: [vt_cell]) -> String {
   #expect(GitBranch.at(wt.path) == "adf99f3")  // detached
   #expect(GitBranch.at(root.path) == nil)
 
-  // the push mark: no upstream, or a different commit there
+  // the push mark: a remote but no upstream, or a different commit there
   let a = "1111111111111111111111111111111111111111"
   let b = "2222222222222222222222222222222222222222"
   try FileManager.default.createDirectory(
@@ -618,8 +618,11 @@ private func rowText(_ row: [vt_cell]) -> String {
     at: git.appendingPathComponent("refs/heads"), withIntermediateDirectories: true)
   try (a + "\n").write(
     to: git.appendingPathComponent("refs/heads/trunk"), atomically: true, encoding: .utf8)
-  #expect(GitBranch.status(sub.path)?.unpushed == true)  // no upstream in config
-  try "[branch \"trunk\"]\n\tremote = origin\n\tmerge = refs/heads/trunk\n".write(
+  #expect(GitBranch.status(sub.path)?.unpushed == false)  // no remote: nowhere to push
+  let origin = "[remote \"origin\"]\n\turl = git@example.com:x.git\n"
+  try origin.write(to: git.appendingPathComponent("config"), atomically: true, encoding: .utf8)
+  #expect(GitBranch.status(sub.path)?.unpushed == true)  // a remote, but no upstream
+  try (origin + "[branch \"trunk\"]\n\tremote = origin\n\tmerge = refs/heads/trunk\n").write(
     to: git.appendingPathComponent("config"), atomically: true, encoding: .utf8)
   #expect(GitBranch.status(sub.path)?.unpushed == true)  // never pushed
   try (b + "\n").write(

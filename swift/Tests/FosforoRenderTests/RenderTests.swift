@@ -373,28 +373,38 @@ func nerdFontIconsComeFromTheSymbolsFont() throws {
   #expect(f.all(row: 0, cols: 2, 6, 0x000000))
 }
 
-/// An emoji one cell wide (U+2620 is text-default, width 1) shrinks into
-/// the cell: clipped, its ink would run to the cell's right edge from top to
-/// bottom.
-@Test func narrowEmojiFitsItsCell() throws {
+/// An emoji one cell wide (U+2620 is text-default, width 1) followed by a
+/// space spreads into it at the size of a wide emoji (U+1F4BE); followed by
+/// text it shrinks into its cell: clipped, its ink would run to the cell's
+/// right edge from top to bottom.
+@Test func narrowEmojiSpreadsOrFitsItsCell() throws {
   var theme = Theme()
   theme.fontSize = 25
   let r = try Renderer(theme: theme, scale: 2)
-  let term = try Terminal(rows: 1, cols: 2, history: 0)
-  theme.apply { term.configure(color: $0, rgb: $1) }
-  term.write("\u{2620}\u{FE0F}")
-  var s = Screen()
-  term.snapshot(into: &s)
   let (w, h) = (r.metrics.width, r.metrics.height)
-  let px = try r.pixels(s, width: 2 * w, height: h, cursorVisible: false)
-  func lit(_ x: Int, _ y: Int) -> Bool {
-    let i = (y * 2 * w + x) * 4
-    return px[i] != 0 || px[i + 1] != 0 || px[i + 2] != 0
+  func ink(_ text: String) throws -> (rows: Int, edge: Int, cols: Int) {
+    let term = try Terminal(rows: 1, cols: 3, history: 0)
+    theme.apply { term.configure(color: $0, rgb: $1) }
+    term.write(text)
+    var s = Screen()
+    term.snapshot(into: &s)
+    let px = try r.pixels(s, width: 3 * w, height: h, cursorVisible: false)
+    func lit(_ x: Int, _ y: Int) -> Bool {
+      let i = (y * 3 * w + x) * 4
+      return px[i] != 0 || px[i + 1] != 0 || px[i + 2] != 0
+    }
+    let rows = (0..<h).filter { y in (0..<(2 * w)).contains { lit($0, y) } }.count
+    let edge = (0..<h).filter { lit(w - 1, $0) }.count
+    let cols = (0..<(2 * w)).filter { x in (0..<h).contains { lit(x, $0) } }.count
+    return (rows, edge, cols)
   }
-  let edge = (0..<h).filter { lit(w - 1, $0) }.count
-  let ink = (0..<h).filter { y in (0..<w).contains { lit($0, y) } }.count
-  #expect(ink > 0)
-  #expect(edge < ink / 2, "\(edge) of \(ink) inked rows reach the right edge")
+  let floppy = try ink("\u{1F4BE}")
+  let spread = try ink("\u{2620}\u{FE0F} ")
+  #expect(spread.rows >= floppy.rows * 9 / 10, "\(spread) against \(floppy)")
+  #expect(spread.cols > w)
+  let fit = try ink("\u{2620}\u{FE0F}x")
+  #expect(fit.rows > 0)
+  #expect(fit.edge < fit.rows / 2, "\(fit.edge) of \(fit.rows) inked rows reach the right edge")
 }
 
 /// An emoji behaves like text under SGR 8 (hidden) and under the cursor:

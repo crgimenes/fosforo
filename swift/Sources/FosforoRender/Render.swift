@@ -262,11 +262,17 @@ public final class Renderer {
     return out
   }
 
-  /// Unicode gives Nerd Font icons width 1, and the programs that print one
-  /// follow it with a space for the icon to spread into.
-  static func iconWithRoom(_ cell: vt_cell, _ next: vt_cell) -> Bool {
-    Atlas.isIcon(cell.cp) && UInt32(cell.flags) & UInt32(VT_CELL_WIDE) == 0
-      && (next.cp == 0 || next.cp == 0x20) && next.bg == cell.bg && next.attr == cell.attr
+  /// Unicode gives Nerd Font icons width 1, and so text-default emoji
+  /// (U+2620, U+26A0, even with VS16); the programs that print one follow it
+  /// with a space for it to spread into, at the size of the wide emoji.
+  static func spreads(_ cell: vt_cell, _ next: vt_cell) -> Bool {
+    guard UInt32(cell.flags) & UInt32(VT_CELL_WIDE) == 0,
+      (next.cp == 0 || next.cp == 0x20) && next.bg == cell.bg && next.attr == cell.attr
+    else {
+      return false
+    }
+    return Atlas.isIcon(cell.cp)
+      || cell.cp >= 0x80 && Unicode.Scalar(cell.cp)?.properties.isEmoji == true
   }
 
   private func instance(
@@ -343,7 +349,7 @@ public final class Renderer {
           covered = false
           continue
         }
-        let icon = c + 1 < screen.cols && Renderer.iconWithRoom(cell, screen.cell(r, c + 1))
+        let icon = c + 1 < screen.cols && Renderer.spreads(cell, screen.cell(r, c + 1))
         covered = icon
         var inst = instance(cell, row: r, col: c, colors: screen.colors, stretch: icon)
         if reverse {

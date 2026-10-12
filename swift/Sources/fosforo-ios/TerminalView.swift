@@ -135,6 +135,11 @@
       NotificationCenter.default.addObserver(
         self, selector: #selector(keyboardMoved(_:)),
         name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+      // where the keyboard ended up, whatever the order of focus and
+      // keyboard was (a cold start focuses before the keyboard is there)
+      NotificationCenter.default.addObserver(
+        self, selector: #selector(keyboardSettled(_:)),
+        name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
       // the Pencil on the terminal is there to draw (no Scribble: its
       // palette took the bar): a press of no length fires on touch-down
       let pencil = UILongPressGestureRecognizer(target: self, action: #selector(pencilDown(_:)))
@@ -738,8 +743,24 @@
     /// comes back a tick later, too late for a layout that undoes another.
     private var asked = (rows: 0, cols: 0)
 
+    /// A rotation docks the keyboard anew without asking the bar its size
+    /// again (on the iPad no size class changes), and the keyboard then
+    /// covers half of it: a new size, with the keyboard in use, reloads it.
+    private var laidSize = CGSize.zero
+
     override func layoutSubviews() {
       super.layoutSubviews()
+      if bounds.size != laidSize {
+        let rotated = laidSize != .zero
+        laidSize = bounds.size
+        if rotated, isFirstResponder, mode == .keyboard, GCKeyboard.coalesced == nil {
+          DispatchQueue.main.async { [weak self] in
+            guard let self, self.isFirstResponder else { return }
+            self.bar.invalidateIntrinsicContentSize()
+            self.reloadInputViews()
+          }
+        }
+      }
       let scale = window?.screen.scale ?? UIScreen.main.scale
       contentScaleFactor = scale
       let w = Int(bounds.width * scale)
@@ -756,8 +777,9 @@
       // the iPad's hide key drops our focus but leaves the guide where the
       // bar was docked, until something else moves the keyboard: without
       // the focus there is no keyboard for this view, whatever the guide says
-      let keyboardUp = isFirstResponder && keyboardTop.frame.maxY < bounds.height - safe.bottom - 1
-      var bottom = keyboardUp ? keyboardTop.frame.maxY : bounds.height - safe.bottom
+      let keyboardY = min(keyboardTop.frame.maxY, notifiedKeyboardTop)
+      let keyboardUp = isFirstResponder && keyboardY < bounds.height - safe.bottom - 1
+      var bottom = keyboardUp ? keyboardY : bounds.height - safe.bottom
       var firm = keyboardUp  // a bottom not to go past: the keyboard, the footer
       if let footer, mode == .pencil {
         let h = KeyBar.height(traitCollection)
@@ -1067,7 +1089,33 @@
     /// keyboard back: when only the bar is left on the screen, let go, as
     /// the menu's Hide Keyboard does. Letting go is all this does, so the
     /// keyboard is never asked back from here.
+    /// Where the keyboard (with our bar) said it would be, in this view.
+    /// At a cold start the layout guide stops some 44 points short of the
+    /// bar and stays there until the keyboard moves again; the notices are
+    /// right. Only the on-screen keyboard's: a hardware one's bar is the
+    /// guide's alone.
+    private var keyboardEnd = CGRect.null
+    private var notifiedKeyboardTop: CGFloat {
+      guard GCKeyboard.coalesced == nil, let screen = window?.screen, !keyboardEnd.isNull else {
+        return .greatestFiniteMagnitude
+      }
+      let r = convert(keyboardEnd, from: screen.coordinateSpace)
+      return r.intersects(bounds) ? r.minY : .greatestFiniteMagnitude
+    }
+
+    private func noteKeyboard(_ note: Notification) {
+      if let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+        keyboardEnd = end
+      }
+      setNeedsLayout()
+    }
+
+    @objc private func keyboardSettled(_ note: Notification) {
+      noteKeyboard(note)
+    }
+
     @objc private func keyboardMoved(_ note: Notification) {
+      noteKeyboard(note)
       guard mode == .keyboard, isFirstResponder, GCKeyboard.coalesced == nil,
         let screen = window?.screen,
         let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
@@ -1106,7 +1154,6 @@
     private func barKey(_ key: KeyBar.Key) {
       switch key {
       case .find: showFind()
-      case .keyboard: enter(.keyboard)
       case .textMode: enter(.text)
       case .ctrl: ctrlLatched.toggle()
       case .alt: altLatched.toggle()

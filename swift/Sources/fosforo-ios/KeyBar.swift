@@ -10,13 +10,15 @@
   /// iPad keyboard does; the arrows are one key, the side touched picks the
   /// direction. Modifiers stay on for the next key and show it; fn swaps
   /// the symbols for F1 to F12. The footer is the iPad's bar for the Pencil
-  /// (drawing over the terminal): a key that brings the keyboard back, the
-  /// drawing tools, colors, undo, clear and share.
+  /// (drawing over the terminal): handwriting, the drawing tools, colors,
+  /// undo, clear and share. No key brings the keyboard back: iPadOS keeps
+  /// it away from a focus the Pencil asks for, so that is the finger's, on
+  /// the terminal.
   final class KeyBar: UIInputView {
     enum Part { case phone, pad, footer }
 
     enum Key: Equatable {
-      case esc, ctrl, alt, tab, fn, find, hide, keyboard, textMode
+      case esc, ctrl, alt, tab, fn, find, hide, textMode
       case undo, clear, share
       case tool(Int)  // index in tools
       case color(Int)  // index in colors
@@ -102,14 +104,7 @@
       for k in left + right {
         k.removeFromSuperview()
       }
-      // the keyboard key first, where it always is
-      let back =
-        part == .footer
-        ? [
-          KeyView(.keyboard, symbol: "keyboard"),
-          KeyView(.textMode, symbol: "character.cursor.ibeam"),
-        ]
-        : []
+      let back = part == .footer ? [KeyView(.textMode, symbol: "character.cursor.ibeam")] : []
       let terminal = [
         KeyView(.esc, symbol: "escape"), KeyView(.ctrl, symbol: "control"),
         KeyView(.alt, symbol: "option"),

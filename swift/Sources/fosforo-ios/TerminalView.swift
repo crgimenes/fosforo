@@ -115,10 +115,10 @@
       addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:))))
       addInteraction(editMenu)
       addInteraction(UIScribbleInteraction(delegate: self))  // to say no (below)
-      // the text system's undo/redo/paste strip means nothing in a terminal
+      // the text system's undo/redo/paste strip means nothing in a terminal,
+      // and with nothing in it the iPad's shortcuts bar stays away
       inputAssistantItem.leadingBarButtonGroups = []
       inputAssistantItem.trailingBarButtonGroups = []
-      placeKeys()
       keyboardTop.isHidden = true
       keyboardTop.translatesAutoresizingMaskIntoConstraints = false
       addSubview(keyboardTop)
@@ -132,6 +132,9 @@
         NotificationCenter.default.addObserver(
           self, selector: #selector(keyboardsChanged(_:)), name: name, object: nil)
       }
+      NotificationCenter.default.addObserver(
+        self, selector: #selector(keyboardMoved(_:)),
+        name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
       // the Pencil on the terminal is there to draw (no Scribble: its
       // palette took the bar): a press of no length fires on touch-down
       let pencil = UILongPressGestureRecognizer(target: self, action: #selector(pencilDown(_:)))
@@ -449,7 +452,6 @@
           footer.isHidden = m != .pencil
         }
         updateInk()
-        placeKeys()
         setNeedsLayout()
       }
       switch m {
@@ -1022,31 +1024,34 @@
         return b
       }
     }()
-    /// The phone's bar over the keyboard.
-    private var bar: KeyBar? { TerminalView.pad ? nil : bars[0] }
+    /// The bar over the keyboard.
+    private var bar: KeyBar { bars[0] }
     /// The iPad's bar with its keyboard away, at the foot of the terminal.
     private var footer: KeyBar? { TerminalView.pad ? bars[1] : nil }
 
-    /// The iPad's keys go in the keyboard's shortcuts bar, by way of an item
-    /// of no size (KeyHost); none with a hardware keyboard unless asked for.
-    private func placeKeys() {
-      let item = inputAssistantItem
-      let want = TerminalView.pad && mode != .text && GCKeyboard.coalesced == nil
-      guard want == item.trailingBarButtonGroups.isEmpty else { return }
-      item.leadingBarButtonGroups = []
-      item.trailingBarButtonGroups =
-        want
-        ? [
-          UIBarButtonItemGroup(
-            barButtonItems: [UIBarButtonItem(customView: KeyHost(bars[0]))],
-            representativeItem: nil)
-        ] : []
+    /// Only for the on-screen keyboard: a hardware one has all of these,
+    /// and the iPad's minimal bar for it is left to the iPad; in text mode
+    /// Scribble's palette is the bar.
+    override var inputAccessoryView: UIView? {
+      GCKeyboard.coalesced == nil && mode != .text ? bar : nil
     }
 
-    /// Only for the on-screen keyboard: a hardware one has all of these,
-    /// and the iPad's minimal bar for it is left to the iPad.
-    override var inputAccessoryView: UIView? {
-      GCKeyboard.coalesced == nil ? bar : nil  // nil on the iPad
+    /// The iPad's hide key takes the keyboard away but leaves us the focus
+    /// and the bar docked at the bottom, so a tap would not bring the
+    /// keyboard back: when only the bar is left on the screen, let go, as
+    /// the menu's Hide Keyboard does. Letting go is all this does, so the
+    /// keyboard is never asked back from here.
+    @objc private func keyboardMoved(_ note: Notification) {
+      guard mode == .keyboard, isFirstResponder, GCKeyboard.coalesced == nil,
+        let screen = window?.screen,
+        let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+      else { return }
+      let shown = screen.bounds.intersection(end).height
+      guard shown > 0, shown <= KeyBar.height(traitCollection) + 1 else { return }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.mode == .keyboard else { return }
+        self.resignFirstResponder()
+      }
     }
 
     /// With no hardware keyboard the focus is the on-screen keyboard.
@@ -1065,7 +1070,6 @@
     }
 
     @objc private func keyboardsChanged(_ note: Notification) {
-      placeKeys()
       reloadInputViews()
       // a keyboard just connected is there to type in the session in front
       if note.name == .GCKeyboardDidConnect, !isHidden, window?.isKeyWindow == true {

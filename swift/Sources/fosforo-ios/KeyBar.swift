@@ -2,9 +2,9 @@
   import CFosforo
   import UIKit
 
-  /// Terminal keys on the on-screen keyboard, plain labels as in Blink. On
-  /// the phone a bar over the keyboard; on the iPad inside the keyboard's
-  /// own shortcuts bar, the whole width (KeyHost puts it there). The fixed
+  /// Terminal keys on the on-screen keyboard, plain labels as in Blink: a
+  /// bar over the keyboard (the input accessory view, the whole width; in an
+  /// iPad window it sits at the window's foot, as iPadOS puts it). The fixed
   /// keys come first, up to fn; what follows scrolls when it does not fit.
   /// A key with two labels gives the small one when flicked down, as the
   /// iPad keyboard does; the arrows are one key, the side touched picks the
@@ -50,14 +50,11 @@
 
     init(_ part: Part) {
       self.part = part
-      super.init(
-        frame: CGRect(x: 0, y: 0, width: 0, height: 44),
-        inputViewStyle: part == .pad ? .default : .keyboard)
-      if part == .phone {
+      super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 44), inputViewStyle: .keyboard)
+      if part != .footer {
         translatesAutoresizingMaskIntoConstraints = false  // sized by intrinsicContentSize
         allowsSelfSizing = true
       }
-      backgroundColor = part == .pad ? .clear : nil
       if part == .footer {
         // on the terminal, not in the keyboard: a dark keyboard's look of its own
         overrideUserInterfaceStyle = .dark
@@ -67,7 +64,7 @@
       scroll.alwaysBounceHorizontal = false
       scroll.delaysContentTouches = false  // a key lights at once, as on the keyboard
       scroll.contentInsetAdjustmentBehavior = .never
-      if #available(iOS 26, *), part == .phone {
+      if #available(iOS 26, *), part != .footer {
         // the keyboard is a rounded sheet of glass: the bar is its top edge
         let glass = UIVisualEffectView(effect: UIGlassEffect())
         glass.cornerConfiguration = .capsule(maximumRadius: 16)
@@ -208,48 +205,6 @@
         sx += w
       }
       scroll.contentSize = CGSize(width: sx, height: area.height)
-    }
-  }
-
-  /// The iPad's way into its keyboard: a bar item of no size whose view, once
-  /// in the keyboard's shortcuts bar, puts the KeyBar over that bar's whole
-  /// width (as Blink does; the view names are UIKit's, not API, so when they
-  /// are not found the bar stays inside the item, narrow but there).
-  final class KeyHost: UIView {
-    let bar: KeyBar
-
-    init(_ bar: KeyBar) {
-      self.bar = bar
-      super.init(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("no coder") }
-
-    override func didMoveToWindow() {
-      super.didMoveToWindow()
-      guard window != nil else {
-        bar.removeFromSuperview()
-        return
-      }
-      setNeedsLayout()
-    }
-
-    override func layoutSubviews() {
-      super.layoutSubviews()
-      guard window != nil else { return }
-      var place: UIView? = superview
-      while let v = place, !String(describing: type(of: v)).contains("InputAssistantView") {
-        place = v.superview
-      }
-      let host = place ?? self
-      if bar.superview !== host {
-        bar.removeFromSuperview()
-        bar.frame = host.bounds
-        bar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        host.addSubview(bar)
-      }
-      host.bringSubviewToFront(bar)
     }
   }
 

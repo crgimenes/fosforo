@@ -50,29 +50,17 @@
 
     init(_ part: Part) {
       self.part = part
-      super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 44), inputViewStyle: .keyboard)
+      // .default: no keyboard backdrop; the bar is the terminal's, in its color
+      super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 44), inputViewStyle: .default)
       if part != .footer {
         translatesAutoresizingMaskIntoConstraints = false  // sized by intrinsicContentSize
         allowsSelfSizing = true
       }
-      if part == .footer {
-        // on the terminal, not in the keyboard: a dark keyboard's look of its own
-        overrideUserInterfaceStyle = .dark
-        backgroundColor = .secondarySystemBackground
-      }
+      paint(background: .black)
       scroll.showsHorizontalScrollIndicator = false
       scroll.alwaysBounceHorizontal = false
       scroll.delaysContentTouches = false  // a key lights at once, as on the keyboard
       scroll.contentInsetAdjustmentBehavior = .never
-      if #available(iOS 26, *), part != .footer {
-        // the keyboard is a rounded sheet of glass: the bar is its top edge
-        let glass = UIVisualEffectView(effect: UIGlassEffect())
-        glass.cornerConfiguration = .capsule(maximumRadius: 16)
-        glass.frame = bounds
-        glass.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        glass.isUserInteractionEnabled = false
-        addSubview(glass)
-      }
       addSubview(scroll)
       rebuild()
       registerForTraitChanges([UITraitVerticalSizeClass.self]) { (self: Self, _) in
@@ -82,6 +70,17 @@
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("no coder") }
+
+    /// The terminal's background, so the bar is a strip of it; the labels
+    /// take the light or dark set that reads on it.
+    func paint(background: UIColor) {
+      backgroundColor = background
+      var r: CGFloat = 0
+      var g: CGFloat = 0
+      var b: CGFloat = 0
+      background.getRed(&r, green: &g, blue: &b, alpha: nil)
+      overrideUserInterfaceStyle = 0.299 * r + 0.587 * g + 0.114 * b < 0.5 ? .dark : .light
+    }
 
     /// Taller on the iPad, lower with the phone on its side: the keyboard's
     /// own rows change the same way, and a fixed height came out clipped

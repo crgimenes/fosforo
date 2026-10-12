@@ -385,6 +385,9 @@
       defaultFontSize = theme.fontSize
       try? renderer.setFontSize(theme.fontSize)
       theme.apply { session.configure(color: $0, rgb: $1) }
+      for b in bars {
+        b.paint(background: TerminalView.color(theme.background))
+      }
       setNeedsLayout()
       dirty = true
     }
@@ -750,7 +753,10 @@
         // the same for the screen's corners would cost a row at each end)
         safe = edgeInsets(for: .safeArea(cornerAdaptation: .vertical))
       }
-      let keyboardUp = keyboardTop.frame.maxY < bounds.height - safe.bottom - 1
+      // the iPad's hide key drops our focus but leaves the guide where the
+      // bar was docked, until something else moves the keyboard: without
+      // the focus there is no keyboard for this view, whatever the guide says
+      let keyboardUp = isFirstResponder && keyboardTop.frame.maxY < bounds.height - safe.bottom - 1
       var bottom = keyboardUp ? keyboardTop.frame.maxY : bounds.height - safe.bottom
       var firm = keyboardUp  // a bottom not to go past: the keyboard, the footer
       if let footer, mode == .pencil {
@@ -853,6 +859,19 @@
     // MARK: - on-screen keyboard
 
     override var canBecomeFirstResponder: Bool { true }
+
+    // the grid's bottom depends on the focus (above): a change lays it out anew
+    @discardableResult override func becomeFirstResponder() -> Bool {
+      let did = super.becomeFirstResponder()
+      setNeedsLayout()
+      return did
+    }
+
+    @discardableResult override func resignFirstResponder() -> Bool {
+      let did = super.resignFirstResponder()
+      setNeedsLayout()
+      return did
+    }
     var hasText: Bool { true }
     var autocorrectionType: UITextAutocorrectionType = .no
     var autocapitalizationType: UITextAutocapitalizationType = .none
@@ -1021,9 +1040,16 @@
       return parts.map { part in
         let b = KeyBar(part)
         b.onKey = { [weak self] in self?.barKey($0) }
+        b.paint(background: TerminalView.color(renderer.theme.background))
         return b
       }
     }()
+
+    private static func color(_ rgb: UInt32) -> UIColor {
+      UIColor(
+        red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
+        blue: CGFloat(rgb & 0xFF) / 255, alpha: 1)
+    }
     /// The bar over the keyboard.
     private var bar: KeyBar { bars[0] }
     /// The iPad's bar with its keyboard away, at the foot of the terminal.
@@ -1036,8 +1062,8 @@
       GCKeyboard.coalesced == nil && mode != .text ? bar : nil
     }
 
-    /// The iPad's hide key takes the keyboard away but leaves us the focus
-    /// and the bar docked at the bottom, so a tap would not bring the
+    /// iPadOS 26 drops our focus with its hide key; should an iPadOS leave
+    /// it, with the bar docked at the bottom, a tap would not bring the
     /// keyboard back: when only the bar is left on the screen, let go, as
     /// the menu's Hide Keyboard does. Letting go is all this does, so the
     /// keyboard is never asked back from here.

@@ -140,7 +140,7 @@ xcrun actool "$out/Assets.xcassets" --compile "$app" --platform iphoneos \
 plutil -lint "$plist" >/dev/null
 
 if [ -f "${FONT_3270:-}" ]; then cp "$FONT_3270" "$app/"; fi
-cp assets/banner.ans assets/banner-narrow.ans assets/PrivacyInfo.xcprivacy "$app/"
+cp assets/banner.ans assets/banner-narrow.ans assets/README-home.md assets/PrivacyInfo.xcprivacy "$app/"
 cp "$profile" "$app/embedded.mobileprovision"
 codesign --force --sign "Apple Distribution: $(pb TeamName) ($team)" \
     --entitlements "$out/entitlements.plist" --generate-entitlement-der --timestamp=none "$app"

@@ -188,7 +188,7 @@ ios-sim: xcframework icons
 	cp assets/Info-iOS.plist build/fosforo-sim.app/Info.plist
 	cp assets/PrivacyInfo.xcprivacy build/fosforo-sim.app/
 	if [ -f "$(FONT_3270)" ]; then cp "$(FONT_3270)" build/fosforo-sim.app/; fi
-	cp assets/banner.ans assets/banner-narrow.ans build/icons/AppIcon*.png build/fosforo-sim.app/
+	cp assets/banner.ans assets/banner-narrow.ans assets/README-home.md build/icons/AppIcon*.png build/fosforo-sim.app/
 	plutil -lint build/fosforo-sim.app/Info.plist
 	codesign --force --sign - build/fosforo-sim.app
 

@@ -15,7 +15,10 @@
     ) -> Bool {
       UNUserNotificationCenter.current().delegate = self
       registerBundledFonts()
-      DispatchQueue.global(qos: .utility).async { AppDelegate.linkICloud() }
+      DispatchQueue.global(qos: .utility).async {
+        AppDelegate.linkICloud()
+        AppDelegate.welcome()
+      }
       RocShell.resolvePlaceholders()
       AppDelegate.installHooks()
       return true
@@ -85,6 +88,20 @@
       withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
       done([.banner, .sound])
+    }
+
+    /// ~/README.md, the first commands, written once: deleted, it stays
+    /// deleted, and a README.md of the user's is never written over.
+    nonisolated static func welcome() {
+      let key = "welcomeWritten"
+      guard !UserDefaults.standard.bool(forKey: key),
+        let text = Bundle.main.url(forResource: "README-home", withExtension: "md")
+      else { return }
+      let dest = Theme.home.appendingPathComponent("README.md")
+      if !FileManager.default.fileExists(atPath: dest.path) {
+        try? FileManager.default.copyItem(at: text, to: dest)
+      }
+      UserDefaults.standard.set(true, forKey: key)
     }
 
     /// ~/iCloud: the app's folder in iCloud Drive ("fosforo"), beside the

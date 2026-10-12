@@ -1,7 +1,9 @@
 # fosforo — App Store listing (draft)
 
 Fields as App Store Connect names them, with their limits. English (U.S.)
-is the primary language.
+is the primary language; Italian and Japanese translations are in
+`listing-it.md` and `listing-ja.md`. No Portuguese (Brazil): the name
+"fosforo" is taken in that localization.
 
 ## Name (30)
 
@@ -160,7 +162,6 @@ asks for (simulators renamed "iPhone" and "iPad" so the prompt is short):
 - iPad 13" (2064 × 2752): `ipad-1-shell.png` (Gohan's greeting, the
   commands, a pipeline).
 
-The iOS build has no Core War, so its shots are gone, and
-`iphone-1-shell.png` (its pipelines run over the warriors) needs
-retaking. Still to make: an iPad SSH session, the new key bar, and the
-phosphor theme.
+The iOS build has no Core War; both shell shots were retaken without the
+warriors (status bar at 9:41). Still to make: an iPad SSH session, the
+new key bar, and the phosphor theme.

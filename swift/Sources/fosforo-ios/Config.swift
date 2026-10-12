@@ -1,4 +1,5 @@
 #if os(iOS)
+  import FosforoCore
   import FosforoMosh
   import FosforoRender
   import FosforoSSH
@@ -9,11 +10,11 @@
   /// app, a grouped table that grows a section at a time. The files stay
   /// the truth: servers are ~/.ssh/config, appearance is settings.filo, and
   /// what changes a key (making, protecting) is the shell's own command,
-  /// typed in the session so it asks as it always does.
+  /// typed in a new session so it asks as it always does.
   @MainActor
   final class ConfigController: UITableViewController {
     private let ssh: URL
-    private let run: (String) -> Void  // a command line, typed in the session in front
+    private let run: (String) -> Void  // a command line, typed in a new session
     private let reload: () -> Void  // the config again, for every window
     private var hosts: [SSHHostsFile.Host] = []
     private var keys: [Launcher.KeyInfo] = []
@@ -63,8 +64,20 @@
       tableView.reloadData()
     }
 
-    /// Closes the screen and types the line in the session, as if typed there.
-    private func type(_ line: String) {
+    /// Closes the screen and types the command in a new session, as if typed
+    /// there; each word reaches it literally, or the command is refused.
+    private func type(_ words: [String]) {
+      let control = { (s: String) in
+        s.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f }
+      }
+      if let bad = words.first(where: control) {
+        alert("Not run", "\(bad.debugDescription) has a control character.")
+        return
+      }
+      type(line: words.map(Shell.quoted).joined(separator: " "))
+    }
+
+    private func type(line: String) {
       dismiss(animated: true) { [run] in run(line + "\r") }
     }
 
@@ -77,7 +90,7 @@
       case .servers: hosts.count + 1
       case .keys: keys.count + 2
       case .appearance: 4
-      case .about: 3
+      case .about: 4
       case nil: 0
       }
     }
@@ -184,6 +197,9 @@
           c.text = "Help"
           c.secondaryText = "help"
           cell.accessoryType = .disclosureIndicator
+        case 2:
+          c.text = "Privacy Policy"
+          cell.accessoryType = .disclosureIndicator
         default:
           c.text = "Source"
           c.secondaryText = "github.com/crgimenes/fosforo"
@@ -202,7 +218,7 @@
         let host = indexPath.row < hosts.count ? hosts[indexPath.row] : nil
         let editor = HostEditor(
           host: host, keys: keys.map(\.name), file: configFile,
-          connect: { [weak self] alias in self?.type("ssh " + alias) })
+          connect: { [weak self] alias in self?.type(["ssh", alias]) })
         navigationController?.pushViewController(editor, animated: true)
       case .keys:
         if indexPath.row < keys.count {
@@ -218,8 +234,12 @@
             self?.change("a theme", { $0.theme = name }) { _ in true }
           }, animated: true)
       case .about where indexPath.row == 1:
-        type("help")
+        type(["help"])
       case .about where indexPath.row == 2:
+        if let url = URL(string: "https://crg.eti.br/projects/fosforo/#privacy") {
+          UIApplication.shared.open(url)
+        }
+      case .about where indexPath.row == 3:
         if let url = URL(string: "https://github.com/crgimenes/fosforo") {
           UIApplication.shared.open(url)
         }
@@ -277,7 +297,7 @@
       if k.state == "plain text" {
         sheet.addAction(
           UIAlertAction(title: "Protect with Face ID…", style: .default) { [weak self] _ in
-            self?.type("key protect " + k.name)
+            self?.type(["key", "protect", k.name])
           })
       }
       sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -304,8 +324,12 @@
       ask.addAction(
         UIAlertAction(title: "Make", style: .default) { [weak self, weak ask] _ in
           let chosen = ask?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? ""
-          guard !chosen.isEmpty, !chosen.contains("/"), !chosen.contains(" ") else { return }
-          self?.type("ssh-keygen -t ed25519 -f ~/.ssh/" + chosen)
+          // plain: ~ must stay outside quotes to expand
+          guard !chosen.contains("/"), Shell.quoted(chosen) == chosen else {
+            self?.alert("New Key", "A name of letters, digits and _ - . + : @ % = , only.")
+            return
+          }
+          self?.type(line: "ssh-keygen -t ed25519 -f ~/.ssh/" + chosen)
         })
       present(ask, animated: true)
     }
@@ -331,25 +355,19 @@
     ) {
       guard let url = urls.first else { return }
       let dest = ssh.appendingPathComponent(url.lastPathComponent)
-      guard let text = try? String(contentsOf: url, encoding: .utf8),
-        text.contains("PRIVATE KEY") || text.contains("FOSFORO PROTECTED KEY")
-      else {
-        alert(url.lastPathComponent, "not a private key")
-        return
-      }
       guard !FileManager.default.fileExists(atPath: dest.path) else {
         alert(
           url.lastPathComponent, "~/.ssh/\(dest.lastPathComponent) exists: rename the file first")
         return
       }
-      do {
-        try FileManager.default.createDirectory(at: ssh, withIntermediateDirectories: true)
-        try FileManager.default.copyItem(at: url, to: dest)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dest.path)
-      } catch {
-        alert(url.lastPathComponent, "\(error)")
+      Task {
+        if case .failure(let error) = await Importer.bringIn(
+          url, to: dest, key: true, replace: false)
+        {
+          alert(url.lastPathComponent, "\(error)")
+        }
+        refresh()
       }
-      refresh()
     }
   }
 

@@ -43,7 +43,7 @@
     /// a resized iPad window too, where a frame from the keyboard
     /// notification measured once goes stale.
     private let keyboardTop = UIView()
-    fileprivate var marked = "" {  // what an input method is composing, not yet sent
+    fileprivate var composing = Composition() {  // an input method's, not yet sent
       didSet { dirty = true }
     }
     private var caret = vt_cursor()  // where composition starts, for the candidate window
@@ -151,10 +151,14 @@
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("no coder") }
 
-    /// The display link and the timer hold the view: without this a closed
-    /// session would keep drawing, and its connection open.
+    /// The display links and the timers hold the view: without this a closed
+    /// session would keep drawing, and its connection open. Safe to repeat.
     func stop() {
       stopCoasting()
+      autoscroll(0)
+      repeatTimer?.invalidate()
+      repeatTimer = nil
+      repeating = nil
       link?.invalidate()
       link = nil
       blink?.invalidate()
@@ -485,7 +489,8 @@
     private var inkColor = 0
     private var history: [PKDrawing] = []  // before each change, for undo
     private var stroke: [PKStrokePoint] = []
-    private var strokeStart = Date()
+    private var strokeStart = Date()  // the stroke's creation date
+    private var strokeTime: TimeInterval = 0  // its first touch, in UITouch time (since boot)
 
     private var ink: PKInk {
       let color = KeyBar.colors[inkColor]
@@ -505,7 +510,7 @@
         stroke.append(
           PKStrokePoint(
             location: t.location(in: canvas),
-            timeOffset: t.timestamp - strokeStart.timeIntervalSince1970,
+            timeOffset: max(0, t.timestamp - strokeTime),
             size: CGSize(width: w, height: w), opacity: 1, force: max(0.3, t.force),
             azimuth: t.azimuthAngle(in: canvas), altitude: t.altitudeAngle))
       }
@@ -528,6 +533,7 @@
       }
       history.append(canvas.drawing)
       strokeStart = Date()
+      strokeTime = p.map(\.timestamp).min() ?? 0
       stroke = []
       add(p)
     }
@@ -605,8 +611,10 @@
           vp.screen, width: Int(bounds.width * scale), height: Int(bounds.height * scale))
       else { return }
       let ink = canvas.drawing.image(from: bounds, scale: scale)
-      let picture = UIGraphicsImageRenderer(size: bounds.size).image { _ in
+      let zoom = canvas.transform  // the frame comes zoomed and shifted: the ink too
+      let picture = UIGraphicsImageRenderer(size: bounds.size).image { ctx in
         UIImage(cgImage: frame, scale: scale, orientation: .up).draw(in: bounds)
+        ctx.cgContext.concatenate(zoom)
         ink.draw(in: bounds)
       }
       let sheet = UIActivityViewController(activityItems: [picture], applicationActivities: nil)
@@ -817,8 +825,8 @@
         title = t
         Hooks.fire("title", t)
       }
-      if scrollBack == 0 && !marked.isEmpty {
-        vp.screen.compose(marked)
+      if scrollBack == 0 && !composing.isEmpty {
+        vp.screen.compose(composing.text)
       }
       guard let drawable = metalLayer.nextDrawable(), let cb = renderer.makeCommandBuffer() else {
         return
@@ -853,7 +861,7 @@
 
     func insertText(_ text: String) {
       live()
-      marked = ""  // the input method's final text replaces what it was composing
+      composing = Composition()  // the input method's final text replaces what it was composing
       if ctrlLatched || altLatched, let cp = text.unicodeScalars.first?.value {
         let m = (ctrlLatched ? UInt32(VT_MOD_CTRL) : 0) | (altLatched ? UInt32(VT_MOD_ALT) : 0)
         ctrlLatched = false
@@ -966,7 +974,7 @@
     /// A held key that the text system typed once: typed again the same
     /// way, unless an input method is composing (a dead key, kana).
     private func retype(_ key: UIKey) {
-      guard marked.isEmpty else { return }
+      guard composing.isEmpty else { return }
       switch key.keyCode {
       case .keyboardDeleteOrBackspace: deleteBackward()
       case .keyboardReturnOrEnter: insertText("\n")
@@ -1176,7 +1184,7 @@
   //
   // The only text this view "holds" is what an input method is composing:
   // it goes to the host when the method commits it, never before. The
-  // positions below index into that marked text and nothing else.
+  // positions below are UTF-16 offsets into that marked text and nothing else.
 
   final class TextPosition: UITextPosition {
     let index: Int
@@ -1197,16 +1205,28 @@
 
   extension TerminalView {
     private func index(_ p: UITextPosition) -> Int {
-      min(max((p as? TextPosition)?.index ?? 0, 0), marked.count)
+      min(max((p as? TextPosition)?.index ?? 0, 0), composing.length)
+    }
+
+    private func nsRange(_ r: UITextRange) -> NSRange {
+      let a = index(r.start)
+      return NSRange(location: a, length: max(index(r.end) - a, 0))
     }
 
     var selectedTextRange: UITextRange? {
-      get { TextRange(marked.count, marked.count) }
-      set {}
+      get {
+        let s = composing.selection
+        return TextRange(s.location, s.location + s.length)
+      }
+      set {
+        if let newValue {
+          composing.select(nsRange(newValue))
+        }
+      }
     }
 
     var markedTextRange: UITextRange? {
-      marked.isEmpty ? nil : TextRange(0, marked.count)
+      composing.isEmpty ? nil : TextRange(0, composing.length)
     }
 
     var markedTextStyle: [NSAttributedString.Key: Any]? {
@@ -1215,32 +1235,32 @@
     }
 
     func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
-      marked = markedText ?? ""
+      composing.mark(markedText ?? "", selected: selectedRange)
     }
 
     /// Accepting the composition as it stands: it is the user's text now.
     func unmarkText() {
-      let text = marked
-      marked = ""
+      let text = composing.commit()
       if !text.isEmpty {
         insertText(text)
       }
     }
 
     var beginningOfDocument: UITextPosition { TextPosition(0) }
-    var endOfDocument: UITextPosition { TextPosition(marked.count) }
+    var endOfDocument: UITextPosition { TextPosition(composing.length) }
 
     func text(in range: UITextRange) -> String? {
-      guard let r = range as? TextRange else { return nil }
-      let chars = Array(marked)
-      let a = min(r.from, chars.count)
-      let b = min(r.to, chars.count)
-      return String(chars[a..<b])
+      composing.text(in: nsRange(range))
     }
 
+    /// Inside a composition the method is still composing: nothing is sent.
+    /// With none there is no text to replace: what comes is typed.
     func replace(_ range: UITextRange, withText text: String) {
-      marked = ""
-      insertText(text)
+      guard !composing.isEmpty else {
+        insertText(text)
+        return
+      }
+      composing.replace(nsRange(range), with: text)
     }
 
     func textRange(from: UITextPosition, to: UITextPosition) -> UITextRange? {
@@ -1249,7 +1269,7 @@
 
     func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
       let i = index(position) + offset
-      return (0...marked.count).contains(i) ? TextPosition(i) : nil
+      return (0...composing.length).contains(i) ? TextPosition(i) : nil
     }
 
     func position(
@@ -1279,7 +1299,8 @@
       byExtending position: UITextPosition, in direction: UITextLayoutDirection
     ) -> UITextRange? {
       let i = index(position)
-      return direction == .left || direction == .up ? TextRange(0, i) : TextRange(i, marked.count)
+      return direction == .left || direction == .up
+        ? TextRange(0, i) : TextRange(i, composing.length)
     }
 
     func baseWritingDirection(

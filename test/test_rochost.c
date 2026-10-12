@@ -1098,6 +1098,108 @@ static void test_fixtures(const char *root) {
     CHECK(system(path) == 0);
 }
 
+/* Links back up the tree (three to the directory itself) are listed, not
+   walked again: the boot that indexes the home stays quick, and the next
+   session is not held behind it. */
+static void test_link_loops(const char *root) {
+    char path[512];
+    char link[600];
+    snprintf(path, sizeof(path), "%s/loop", root);
+    CHECK(mkdir(path, 0755) == 0);
+    for (int i = 0; i < 3; i++) {
+        snprintf(link, sizeof(link), "%s/l%d", path, i);
+        CHECK(symlink(".", link) == 0);
+    }
+    struct timeval t0;
+    struct timeval t1;
+    gettimeofday(&t0, NULL);
+    froc *s = froc_new(root, "teste", "box", NULL, 80, 24);
+    gettimeofday(&t1, NULL);
+    CHECK(s != NULL);
+    double took = (double)(t1.tv_sec - t0.tv_sec) + (double)(t1.tv_usec - t0.tv_usec) / 1e6;
+    CHECK(took < 1.0);
+    take(s);
+    froc *other = froc_new(root, "teste", "box", NULL, 80, 24);
+    CHECK(other != NULL);
+    take(other);
+    type(other, "ls loop\r");
+    CHECK(strstr(take(other), "l2") != NULL);
+    froc_free(other);
+    froc_free(s);
+    snprintf(link, sizeof(link), "rm -rf %s", path);
+    CHECK(system(link) == 0);
+}
+
+static mode_t mode_of(const char *root, const char *name) {
+    char path[512];
+    struct stat st;
+    snprintf(path, sizeof(path), "%s/%s", root, name);
+    return stat(path, &st) == 0 ? st.st_mode & 07777 : 0;
+}
+
+static void make_file(const char *root, const char *name, mode_t mode) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", root, name);
+    FILE *f = fopen(path, "w");
+    CHECK(f != NULL);
+    if (f != NULL) {
+        fputs("old\n", f);
+        fclose(f);
+    }
+    CHECK(chmod(path, mode) == 0);
+}
+
+/* A file rewritten by the shell, by a redirection (fh_open) or by cp
+   (file_put), keeps its mode: a key stays 0600, a script stays runnable. */
+static void test_modes_kept(const char *root) {
+    mode_t old = umask(022);
+    make_file(root, "key", 0600);
+    make_file(root, "run.sh", 0755);
+    make_file(root, "src.txt", 0644);
+    froc *s = froc_new(root, "teste", "box", NULL, 80, 24);
+    CHECK(s != NULL);
+    take(s);
+    type(s, "echo new > key\r");
+    CHECK(mode_of(root, "key") == 0600);
+    type(s, "cp src.txt run.sh\r");
+    CHECK(mode_of(root, "run.sh") == 0755);
+    type(s, "cp src.txt key\r");
+    CHECK(mode_of(root, "key") == 0600);
+    type(s, "echo fresh > new.txt\r");
+    CHECK(mode_of(root, "new.txt") == 0644);
+    froc_free(s);
+    umask(old);
+    char path[512];
+    const char *names[] = {"key", "run.sh", "src.txt", "new.txt"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        snprintf(path, sizeof(path), "%s/%s", root, names[i]);
+        unlink(path);
+    }
+}
+
+/* Two dots inside a name are a name; only a ".." component climbs. */
+static void test_dots_in_names(const char *root) {
+    froc *s = froc_new(root, "teste", "box", NULL, 80, 24);
+    CHECK(s != NULL);
+    take(s);
+    type(s, "echo dots > report..txt\r");
+    type(s, "cat report..txt\r");
+    CHECK(strstr(take(s), "dots") != NULL);
+    type(s, "ls\r");
+    CHECK(strstr(take(s), "report..txt") != NULL);
+    type(s, "mv report..txt final..txt\r");
+    type(s, "cat final..txt\r");
+    CHECK(strstr(take(s), "dots") != NULL);
+    type(s, "rm final..txt\r");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/final..txt", root);
+    struct stat st;
+    CHECK(stat(path, &st) != 0);
+    type(s, "cat ../../etc/hosts\r");
+    CHECK(strstr(take(s), "localhost") == NULL);
+    froc_free(s);
+}
+
 int main(void) {
     char root[] = "/tmp/fosforo-rochost-XXXXXX";
     if (mkdtemp(root) == NULL) {
@@ -1121,6 +1223,9 @@ int main(void) {
     test_interrupt(root);
     test_history_shared(root);
     test_sessions_at_once(root);
+    test_link_loops(root);
+    test_modes_kept(root);
+    test_dots_in_names(root);
     rmdir(root);
     if (failures > 0) {
         fprintf(stderr, "%d failure(s)\n", failures);

@@ -17,6 +17,9 @@ public struct SSHConfig: Sendable {
   /// Trust on first use. An unknown key is refused when false; a changed
   /// key is always refused.
   public var acceptNewHostKeys = true
+  /// The unknown key the user saw and accepted: taken only if presented
+  /// again, so a yes to one fingerprint is never a yes to another.
+  public var acceptedHostKey: [UInt8]?
   public var timeout: TimeInterval = 15
   /// ServerAliveInterval: seconds of silence before asking the server if
   /// it is there; 0 never asks. ServerAliveCountMax questions unanswered
@@ -128,14 +131,14 @@ public final class SSHClient: @unchecked Sendable {
   static let maxPacket: UInt32 = 32768
 
   let config: SSHConfig
-  private var io: PacketIO?
-  fileprivate let lock = NSLock()  // packet writes, the channels and the state below
+  var io: PacketIO?
+  let lock = NSLock()  // packet writes, the channels and the state below
   private var serverVersion = ""
   private var sessionID: [UInt8] = []
   private var hostKey: [UInt8] = []
   private var strict = false
   fileprivate var kexActive = false
-  fileprivate var channels: [UInt32: SSHChannel] = [:]
+  var channels: [UInt32: SSHChannel] = [:]
   private var nextID: UInt32 = 0
   private var main: SSHChannel?  // the first channel: what the client's own callbacks speak for
   private var cancelled = false  // cancel() or close() before the session was open
@@ -534,19 +537,16 @@ public final class SSHClient: @unchecked Sendable {
     let send = GCMCipher(key: SymmetricKey(data: derive("C", csKey)), iv: derive("A", 12))
     let recv = GCMCipher(key: SymmetricKey(data: derive("D", scKey)), iv: derive("B", 12))
 
-    lock.lock()
-    do {
-      try writeLocked([Msg.newkeys])
-    } catch {
-      lock.unlock()
-      throw error
-    }
     let c = try conn
-    c.sendCipher = send
-    if strict {
-      c.sendSeq = 0
+    do {
+      lock.lock()
+      defer { lock.unlock() }
+      try writeLocked([Msg.newkeys])
+      c.sendCipher = send
+      if strict {
+        c.sendSeq = 0
+      }
     }
-    lock.unlock()
     let nk = try next()
     guard nk.first == Msg.newkeys else {
       throw SSHError.protocolError("expected NEWKEYS, got message \(nk.first ?? 0)")
@@ -574,8 +574,8 @@ public final class SSHClient: @unchecked Sendable {
         host: KnownHosts.name(host: config.host, port: config.port),
         fingerprint: KnownHosts.fingerprint(blob), file: file, line: line)
     case .unknown:
-      guard config.acceptNewHostKeys else {
-        throw SSHError.hostKey("unknown host \(config.host), key \(KnownHosts.fingerprint(blob))")
+      guard config.acceptNewHostKeys || blob == config.acceptedHostKey else {
+        throw SSHError.unknownHostKey(host: config.host, key: blob)
       }
       try kh.add(host: config.host, port: config.port, blob: blob)
     }
@@ -882,6 +882,10 @@ public final class SSHClient: @unchecked Sendable {
     let sender = try r.u32()
     let window = try r.u32()
     let max = try r.u32()
+    guard max > 0 else {
+      try refuse(sender, "maximum packet size 0")
+      return
+    }
     switch type {
     case "forwarded-tcpip":
       _ = try r.text()  // the address it came to, as the server names it
@@ -1036,7 +1040,7 @@ public final class SSHClient: @unchecked Sendable {
   }
 
   /// One packet from the server, to its channel or to the connection.
-  private func handle(_ p: [UInt8]) throws {
+  func handle(_ p: [UInt8]) throws {
     var r = SSHReader(p)
     switch try r.byte() {
     case Msg.channelData:
@@ -1059,12 +1063,16 @@ public final class SSHClient: @unchecked Sendable {
       let id = try r.u32()
       let name = try r.text()
       let want = try r.bool()
+      var status: Int32?
+      if name == "exit-status" {
+        status = Int32(bitPattern: try r.u32())
+      } else if name == "exit-signal" {
+        status = 255
+      }
       lock.lock()
       let ch = channels[id]
-      if name == "exit-status" {
-        ch?.exitStatus = Int32(bitPattern: try r.u32())
-      } else if name == "exit-signal" {
-        ch?.exitStatus = 255
+      if let status {
+        ch?.exitStatus = status
       }
       if want, let ch {
         var w = SSHWriter(message: Msg.channelFailure)
@@ -1111,7 +1119,7 @@ public final class SSHClient: @unchecked Sendable {
       ch?.remote = remote
       ch?.remoteWindow = window
       ch?.remoteMax = max
-      ch?.answer = .success(())
+      ch?.answer = max > 0 ? .success(()) : .failure(.protocolError("maximum packet size 0"))
       lock.unlock()
       ch?.gate.signal()
     case Msg.channelOpenFailure:
@@ -1244,20 +1252,23 @@ public final class SSHChannel: @unchecked Sendable {
   }
 
   func received(_ data: [UInt8]) throws {
-    client.lock.lock()
-    let deliver = started
-    if !deliver && !data.isEmpty {
-      queued.append(data)
+    let deliver: Bool
+    do {
+      client.lock.lock()
+      defer { client.lock.unlock() }
+      deliver = started
+      if !deliver && !data.isEmpty {
+        queued.append(data)
+      }
+      localWindow -= min(localWindow, UInt32(data.count))
+      if localWindow < SSHClient.window / 2 {
+        var w = SSHWriter(message: Msg.channelWindowAdjust)
+        w.u32(remote)
+        w.u32(SSHClient.window - localWindow)
+        try client.writeLocked(w.bytes)
+        localWindow = SSHClient.window
+      }
     }
-    localWindow -= min(localWindow, UInt32(data.count))
-    if localWindow < SSHClient.window / 2 {
-      var w = SSHWriter(message: Msg.channelWindowAdjust)
-      w.u32(remote)
-      w.u32(SSHClient.window - localWindow)
-      try client.writeLocked(w.bytes)
-      localWindow = SSHClient.window
-    }
-    client.lock.unlock()
     if deliver && !data.isEmpty {
       onData?(data)
     }
@@ -1289,7 +1300,10 @@ public final class SSHChannel: @unchecked Sendable {
 
   func flushLocked() throws {
     while !client.kexActive && !pending.isEmpty && remoteWindow > 0 && !closeSent {
-      let n = min(pending.count, Int(remoteWindow), Int(min(remoteMax, SSHClient.maxPacket)) - 64)
+      // headroom for servers that count the header in their maximum; a
+      // small maximum is valid and taken as it is
+      let most = Int(min(remoteMax, SSHClient.maxPacket))
+      let n = min(pending.count, Int(remoteWindow), most > 1024 ? most - 64 : max(most, 1))
       var w = SSHWriter(message: Msg.channelData)
       w.u32(remote)
       w.string(Array(pending[0..<n]))

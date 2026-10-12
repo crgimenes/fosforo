@@ -49,3 +49,14 @@ import Testing
   msg.field(1, bytes: inst.bytes)
   #expect(try decodeHost(msg.bytes) == [.resize(cols: 120, rows: 40), .bytes(Array("hi".utf8))])
 }
+
+@Test func malformedFieldsAreErrorsNotTraps() {
+  let tooLong: [UInt8] = [0x0A] + Array(repeating: 0xFF, count: 9) + [0x01]  // UInt64.max
+  #expect(throws: MoshError.self) { try Instruction.decode(tooLong) }
+  let pastEnd: [UInt8] = [0x0A, 0x05, 0x01]
+  #expect(throws: MoshError.self) { try Instruction.decode(pastEnd) }
+  let endless: [UInt8] = [0x08] + Array(repeating: 0x80, count: 11)
+  #expect(throws: MoshError.self) { try Instruction.decode(endless) }
+  let cut: [UInt8] = [0x08, 0x80]
+  #expect(throws: MoshError.self) { try Instruction.decode(cut) }
+}

@@ -11,6 +11,8 @@ public enum SSHError: Error, CustomStringConvertible, Equatable {
   case locked(String)
   /// Another key than the one on record, at line of file.
   case hostKeyChanged(host: String, fingerprint: String, file: String, line: Int)
+  /// No key on record for host; key is the one it presented.
+  case unknownHostKey(host: String, key: [UInt8])
 
   public var description: String {
     switch self {
@@ -23,6 +25,8 @@ public enum SSHError: Error, CustomStringConvertible, Equatable {
     case .locked(let s): return "ssh: \(s) needs its passphrase"
     case .hostKeyChanged(let h, let fp, let file, let line):
       return "ssh host key: \(h) presented \(fp), not the key at \(file):\(line): refusing"
+    case .unknownHostKey(let h, let key):
+      return "ssh host key: unknown host \(h), key \(KnownHosts.fingerprint(key))"
     }
   }
 }

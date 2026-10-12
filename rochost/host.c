@@ -23,10 +23,10 @@
 #include <unistd.h>
 
 enum {
-    FILE_MAX = 16 << 20, /* larger files are not the shell's business */
-    SCRATCH_MAX = 64 << 20,
-    INDEX_MAX = 1 << 20, /* the index the core accepts is bounded too */
-    ENTRIES_MAX = 10000, /* a runaway tree must not stall the boot */
+    FILE_MAX = 16U << 20U, /* larger files are not the shell's business */
+    SCRATCH_MAX = 64U << 20U,
+    INDEX_MAX = 1U << 20U, /* the index the core accepts is bounded too */
+    ENTRIES_MAX = 10000,   /* a runaway tree must not stall the boot */
     DEPTH_MAX = 16,
 };
 
@@ -41,6 +41,9 @@ struct froc {
     char *index;
     size_t index_len;
     size_t entries;
+    struct stat *seen; /* the directories walked so far, by st_dev and st_ino */
+    size_t seen_n;
+    size_t seen_cap;
     uint8_t *out; /* the shell's output, kept until the host takes it */
     size_t out_len;
     size_t out_cap;
@@ -68,15 +71,24 @@ static void *ph_ctx;
 
 typedef struct froc host_state;
 
-static int safe(const char *path) {
-    return path[0] == '/' && strstr(path, "..") == NULL;
+/* Absolute, with no ".." component; "report..txt" is a name like any other. */
+static bool safe(const char *path) {
+    if (path[0] != '/') {
+        return false;
+    }
+    for (const char *p = path; (p = strstr(p, "..")) != NULL; p += 2) {
+        if (p[-1] == '/' && (p[2] == '/' || p[2] == '\0')) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /* Only paths under the mount reach the disk. */
-static int full_path(const host_state *h, const char *path, char *out, size_t cap) {
+static bool full_path(const host_state *h, const char *path, char *out, size_t cap) {
     size_t m = strlen(h->mount);
     if (!safe(path) || strncmp(path, h->mount, m) != 0 || (path[m] != '/' && path[m] != '\0')) {
-        return 0;
+        return false;
     }
     int n = snprintf(out, cap, "%s%s", h->root, path + m);
     return n > 0 && (size_t)n < cap;
@@ -101,6 +113,7 @@ static void mount_for(const char *user, char *out, size_t cap) {
 static void index_add(host_state *h, const char *line) {
     size_t n = strlen(line);
     if (h->index_len + n > INDEX_MAX || h->entries >= ENTRIES_MAX) {
+        h->entries = ENTRIES_MAX; /* full: the walk stops here */
         return;
     }
     char *p = realloc(h->index, h->index_len + n);
@@ -146,18 +159,41 @@ static int placeholder(const host_state *h, const char *dir, const char *name, c
     return stat(full, &st) != 0; /* downloaded already: the real entry lists it */
 }
 
+/* A directory walked already (a link back up, or a second link to it) is
+   listed but not walked again: links are followed, ~/iCloud is one, and
+   without this a loop of them grows the walk exponentially. */
+static bool first_visit(host_state *h, const struct stat *st) {
+    for (size_t i = 0; i < h->seen_n; i++) {
+        if (h->seen[i].st_dev == st->st_dev && h->seen[i].st_ino == st->st_ino) {
+            return false;
+        }
+    }
+    if (h->seen_n == h->seen_cap) {
+        size_t cap = h->seen_cap == 0 ? 64 : h->seen_cap * 2;
+        struct stat *p = realloc(h->seen, cap * sizeof(*p));
+        if (p == NULL) {
+            return false;
+        }
+        h->seen = p;
+        h->seen_cap = cap;
+    }
+    h->seen[h->seen_n++] = *st;
+    return true;
+}
+
 static void walk(host_state *h, const char *rel, int depth) {
     char dir[2048];
     snprintf(dir, sizeof(dir), "%s%s", h->root, rel);
-    DIR *d = opendir(dir);
-    if (d == NULL || depth > DEPTH_MAX) {
-        if (d != NULL) {
-            closedir(d);
-        }
+    struct stat self;
+    if (depth > DEPTH_MAX || stat(dir, &self) != 0 || !first_visit(h, &self)) {
         return;
     }
-    struct dirent *e;
-    while ((e = readdir(d)) != NULL) {
+    DIR *d = opendir(dir);
+    if (d == NULL) {
+        return;
+    }
+    const struct dirent *e;
+    while (h->entries < ENTRIES_MAX && (e = readdir(d)) != NULL) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) {
             continue;
         }
@@ -266,6 +302,22 @@ static bool parents(const host_state *h, const char *full) {
     return true;
 }
 
+/* A file to rename over full, with full's mode set before a byte goes in (a
+   key stays 0600, a script keeps its x bits); a new one is 0644 less the
+   umask, as before. */
+static int open_replacement(const char *full, const char *tmp) {
+    struct stat st;
+    bool exists = stat(full, &st) == 0 && S_ISREG(st.st_mode) != 0;
+    unlink(tmp); /* a leftover of a crash, with this name */
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, exists ? 0600 : 0644);
+    if (fd >= 0 && exists && fchmod(fd, st.st_mode & 07777U) != 0) {
+        close(fd);
+        unlink(tmp);
+        return -1;
+    }
+    return fd;
+}
+
 static bool file_put(void *ctx, const char *path, const uint8_t *data, size_t len) {
     const host_state *h = ctx;
     char full[2048];
@@ -276,8 +328,13 @@ static bool file_put(void *ctx, const char *path, const uint8_t *data, size_t le
     /* this process and session's own: two sessions may write the same file */
     snprintf(tmp, sizeof(tmp), "%s.%d-%lx.fosforo-tmp", full, (int)getpid(),
              (unsigned long)(uintptr_t)h);
-    FILE *f = fopen(tmp, "wb");
+    int fd = open_replacement(full, tmp);
+    FILE *f = fd < 0 ? NULL : fdopen(fd, "wb");
     if (f == NULL) {
+        if (fd >= 0) {
+            close(fd);
+            unlink(tmp);
+        }
         return false;
     }
     size_t w = fwrite(data, 1, len, f);
@@ -525,7 +582,7 @@ static int fh_open(void *ctx, const char *path, int mode, void **h, uint64_t *si
     } else if (mode == ROC_FH_WRITE) {
         snprintf(f->tmp, sizeof(f->tmp), "%s.%d-%lx.fosforo-tmp", full, (int)getpid(),
                  (unsigned long)(uintptr_t)f);
-        f->fd = open(f->tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        f->fd = open_replacement(full, f->tmp);
     } else {
         f->fd = open(full, O_WRONLY | O_APPEND | O_CREAT, 0644);
     }
@@ -636,6 +693,10 @@ static void serve(host_state *h) {
         h->index_len = 0;
         h->entries = 0;
         walk(h, "", 0);
+        free(h->seen);
+        h->seen = NULL;
+        h->seen_n = 0;
+        h->seen_cap = 0;
         feed_bytes(h, h->req_id, (const uint8_t *)h->index, h->index_len);
         return;
     }
@@ -781,6 +842,7 @@ static void history_save(host_state *h) {
     size_t len = 0;
     const uint8_t *old = file_get(h, path, &len);
     if (old == NULL) {
+        old = (const uint8_t *)"";
         len = 0;
     }
     size_t lines = 0;

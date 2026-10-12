@@ -71,7 +71,8 @@ jobs:
       - run: make -C fosforo swift-fmt swift-build swift-test
 
   # The C lint, with LLVM's own tools, on the headers it is written for: the
-  # pty is a Mac's (openpty from util.h).
+  # pty is a Mac's (openpty from util.h). The rocchetto host is linted with
+  # rocchetto's flags, so its library is built first.
   lint:
     runs-on: macos-26
     timeout-minutes: 20
@@ -81,11 +82,59 @@ jobs:
           path: fosforo
       - uses: actions/checkout@v4
         with:
+          repository: crgimenes/rocchetto
+          path: rocchetto
+      - uses: actions/checkout@v4
+        with:
           repository: crgimenes/clang_filo
           path: clang_filo
       - uses: actions/checkout@v4
         with:
           repository: crgimenes/filo-term
           path: filo-term
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/corewar
+          path: corewar
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/edt
+          path: edt
       - run: brew install llvm cppcheck
       - run: make -C fosforo fmt-check tidy check LLVM="$(brew --prefix llvm)/bin"
+
+  # The iOS app: the UIKit code (#if os(iOS)) the Mac build never compiles,
+  # for the simulator and, Release with every warning an error, for devices.
+  # Nothing is signed for distribution and nothing runs.
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: fosforo
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/rocchetto
+          path: rocchetto
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/clang_filo
+          path: clang_filo
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/filo-term
+          path: filo-term
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/corewar
+          path: corewar
+      - uses: actions/checkout@v4
+        with:
+          repository: crgimenes/edt
+          path: edt
+      - run: make -C fosforo ios-sim
+      - run: >
+          cd fosforo/swift && xcodebuild -scheme fosforo-ios -destination 'generic/platform=iOS'
+          -configuration Release -derivedDataPath ../build/dd-ios-rel CODE_SIGNING_ALLOWED=NO
+          SWIFT_TREAT_WARNINGS_AS_ERRORS=YES -quiet build

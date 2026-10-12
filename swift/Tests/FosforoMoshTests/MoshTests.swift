@@ -1360,3 +1360,38 @@ func moshPredictsTypingButNotPasswords() throws {
   s.send("echo via-i; exit\r")
   #expect(waitScreen(s, "via-i"))
 }
+
+@Test func keysComeInWholeAndClosed() throws {
+  let fm = FileManager.default
+  let dir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? fm.removeItem(at: dir) }
+  try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+  let ssh = dir.appendingPathComponent(".ssh")
+  try fm.createDirectory(
+    at: ssh, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+  let key = "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n"
+  let src = dir.appendingPathComponent("id_test")
+  try key.write(to: src, atomically: true, encoding: .utf8)
+  let dest = ssh.appendingPathComponent("id_test")
+  try Launcher.bringIn(src, to: dest, key: true, replace: false)
+  func mode(_ u: URL) throws -> Int {
+    (try fm.attributesOfItem(atPath: u.path)[.posixPermissions] as? Int) ?? -1
+  }
+  #expect(try mode(dest) == 0o600)
+  #expect(try mode(ssh) == 0o700)
+  #expect(try String(contentsOf: dest, encoding: .utf8) == key)
+  // one there already stays, unless replacing was asked
+  #expect(throws: Error.self) { try Launcher.bringIn(src, to: dest, key: true, replace: false) }
+  let notKey = dir.appendingPathComponent("notes")
+  try "hello".write(to: notKey, atomically: true, encoding: .utf8)
+  #expect(throws: Error.self) { try Launcher.bringIn(notKey, to: dest, key: true, replace: true) }
+  let big = dir.appendingPathComponent("big")
+  try Data(repeating: 0x41, count: Launcher.maxKeyFile + 1).write(to: big)
+  #expect(throws: Error.self) { try Launcher.bringIn(big, to: dest, key: true, replace: true) }
+  #expect(try String(contentsOf: dest, encoding: .utf8) == key)
+  // anything else: copied whole, renamed into place
+  let copy = dir.appendingPathComponent("notes-copy")
+  try Launcher.bringIn(notKey, to: copy, key: false, replace: false)
+  #expect(try String(contentsOf: copy, encoding: .utf8) == "hello")
+  #expect(try fm.contentsOfDirectory(atPath: ssh.path) == ["id_test"])  // no temporary left
+}

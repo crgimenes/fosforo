@@ -26,7 +26,7 @@ public final class Launcher: Transport, @unchecked Sendable {
 
   /// A yes/no or a password the next line answers.
   private enum Question {
-    case hostKey(Target, jump: Bool)  // the key asked about is the jump host's
+    case hostKey(Target, jump: Bool, key: [UInt8])  // jump: the key asked about is the jump host's
     case password(Target)
     case passphrase(Target, String)  // the path of the key file it unlocks
     case confirm(() -> Void)  // yes runs it
@@ -54,7 +54,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     var noKeys = false  // -o PubkeyAuthentication=no: straight to the password
     var jumpSpec: [String]?  // -J or ProxyJump as ssh arguments ([-p port] [user@]host), one hop
     var jump: SSHConfig?  // the hop, keys loaded, ready to tunnel to ssh.host
-    var jumpAccepted = false  // the hop's unknown host key was taken
+    var jumpKey: [UInt8]?  // the hop's unknown host key, accepted
   }
 
   /// Where keys, config and known_hosts live, as ~/.ssh on a computer: the
@@ -653,7 +653,7 @@ public final class Launcher: Transport, @unchecked Sendable {
 
   /// .ssh as ssh wants it (0700) and, on iOS, out of the device's backups:
   /// the keys stay on this device.
-  private func makeDirectory(_ url: URL) throws {
+  public static func makeDirectory(_ url: URL) throws {
     try FileManager.default.createDirectory(
       at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     #if os(iOS)
@@ -664,28 +664,109 @@ public final class Launcher: Transport, @unchecked Sendable {
     #endif
   }
 
-  private func save(_ data: Data, to url: URL) throws {
+  /// A key file, whole or not at all: written under a temporary name already
+  /// 0600 (on iOS, complete protection too), then renamed to url, so no
+  /// moment shows it open; replace false leaves a file already there alone.
+  public static func store(_ data: Data, at url: URL, replace: Bool = true) throws {
+    func failure(_ what: String) -> Error {
+      NSError(
+        domain: NSPOSIXErrorDomain, code: Int(errno),
+        userInfo: [
+          NSLocalizedDescriptionKey: "\(what) \(url.path): \(String(cString: strerror(errno)))"
+        ])
+    }
+    let tmp = url.deletingLastPathComponent()
+      .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)").path
+    let fd = Darwin.open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+    guard fd >= 0 else { throw failure("create") }
+    var done = false
+    defer {
+      if !done {
+        unlink(tmp)
+      }
+    }
+    let wrote = data.withUnsafeBytes { buf -> Bool in
+      var off = 0
+      while off < buf.count {
+        let n = Darwin.write(fd, buf.baseAddress! + off, buf.count - off)
+        guard n > 0 else { return false }
+        off += n
+      }
+      return true
+    }
+    let synced = wrote && fsync(fd) == 0
+    Darwin.close(fd)
+    guard synced else { throw failure("write") }
     #if os(iOS)
-      let options: Data.WritingOptions = [.atomic, .completeFileProtection]
-    #else
-      let options: Data.WritingOptions = [.atomic]  // no data protection classes on macOS
+      try FileManager.default.setAttributes(
+        [.protectionKey: FileProtectionType.complete], ofItemAtPath: tmp)
     #endif
-    try data.write(to: url, options: options)
-    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    let moved = replace ? rename(tmp, url.path) : renamex_np(tmp, url.path, UInt32(RENAME_EXCL))
+    guard moved == 0 else { throw failure(errno == EEXIST ? "exists:" : "rename") }
+    done = true
+  }
+
+  /// The most a key file brought in may weigh: keys are a few KB.
+  public static let maxKeyFile = 64 * 1024
+
+  public static func looksLikeKey(_ text: String) -> Bool {
+    text.contains("PRIVATE KEY") || text.contains("FOSFORO PROTECTED KEY")
+  }
+
+  /// A file from outside the app (Files, Open in) into dest: a key through
+  /// store(), after its size and its look are checked; anything else copied
+  /// under a temporary name and renamed. A failure leaves dest as it was;
+  /// replace false refuses a file already there.
+  public static func bringIn(_ src: URL, to dest: URL, key: Bool, replace: Bool) throws {
+    let name = src.lastPathComponent
+    if key {
+      let size = try src.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+      guard size <= maxKeyFile else {
+        throw SSHError.io("\(name): \(size) bytes, too big for a key")
+      }
+      let data = try Data(contentsOf: src)
+      guard data.count <= maxKeyFile, looksLikeKey(String(decoding: data, as: UTF8.self)) else {
+        throw SSHError.io("\(name): not a private key")
+      }
+      let dir = dest.deletingLastPathComponent()
+      try makeDirectory(dir)
+      // ~/.ssh may have been made 0755 by the shell's mkdir
+      try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+      try store(data, at: dest, replace: replace)
+      return
+    }
+    let tmp = dest.deletingLastPathComponent()
+      .appendingPathComponent(".\(dest.lastPathComponent).\(UUID().uuidString)")
+    try FileManager.default.copyItem(at: src, to: tmp)
+    let moved =
+      replace ? rename(tmp.path, dest.path) : renamex_np(tmp.path, dest.path, UInt32(RENAME_EXCL))
+    guard moved == 0 else {
+      let why = String(cString: strerror(errno))
+      try? FileManager.default.removeItem(at: tmp)
+      throw SSHError.io("\(dest.path): \(why)")
+    }
+  }
+
+  private func makeDirectory(_ url: URL) throws {
+    try Launcher.makeDirectory(url)
+  }
+
+  private func save(_ data: Data, to url: URL) throws {
+    try Launcher.store(data, at: url)
   }
 
   private func answer(_ q: Question, _ text: String) {
     switch q {
-    case .hostKey(var t, let jump):
+    case .hostKey(var t, let jump, let key):
       guard text.lowercased() == "yes" else {
         say("not connecting\r\n")
         finish()
         return
       }
       if jump {
-        t.jumpAccepted = true
+        t.jumpKey = key
       } else {
-        t.ssh.acceptNewHostKeys = true
+        t.ssh.acceptedHostKey = key
       }
       connect(t)
     case .password(var t):
@@ -1116,7 +1197,7 @@ public final class Launcher: Transport, @unchecked Sendable {
           return
         }
         hop.ssh.keys = found.keys
-        hop.ssh.acceptNewHostKeys = t.jumpAccepted
+        hop.ssh.acceptedHostKey = t.jumpKey
         hop.ssh.trace = t.ssh.trace
         hop.ssh.tunnel = SSHConfig.Tunnel(host: t.ssh.host, port: t.ssh.port)
         t.jump = hop.ssh
@@ -1274,9 +1355,14 @@ public final class Launcher: Transport, @unchecked Sendable {
     lock.unlock()
     do {
       try pending(client, mine)
-      try client.connect(over: fd)
     } catch {
       Darwin.close(fd)  // ends the hop's pump, which closes its channel
+      throw error
+    }
+    do {
+      try client.connect(over: fd)  // the client owns fd from here, failing or not
+    } catch {
+      client.disconnect()  // shuts fd: the hop's pump ends; the client closes it
       throw error
     }
   }
@@ -1347,9 +1433,11 @@ public final class Launcher: Transport, @unchecked Sendable {
         + "The one on record is at \(shown(URL(fileURLWithPath: file))) line \(line).\r\n"
         + "Someone may be in the middle, or the host was reinstalled.\r\n"
         + "If the change is expected: ssh-keygen -R \(quoted), then connect again.\r\n"
-    case .hostKey(let msg) where msg.hasPrefix("unknown host"):
-      ask = .hostKey(t, jump: viaJump)
-      text = "\(msg)\(viaJump ? " (the jump host)" : "")\r\naccept and remember it? (yes/no) "
+    case .unknownHostKey(let host, let key):
+      ask = .hostKey(t, jump: viaJump, key: key)
+      text =
+        "unknown host \(host), key \(KnownHosts.fingerprint(key))"
+        + "\(viaJump ? " (the jump host)" : "")\r\naccept and remember it? (yes/no) "
     case .auth(let msg) where viaJump:
       text = "\(t.jump?.host ?? "jump host"): \(msg) (the jump host takes keys only)\r\n"
     case .auth(let msg)

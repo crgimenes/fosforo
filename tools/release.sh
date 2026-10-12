@@ -1,6 +1,7 @@
 #!/bin/sh
 # The Mac build for people other than its developer: signed with Developer
-# ID and the hardened runtime, notarized by Apple, stapled, zipped. Nothing
+# ID and the hardened runtime, notarized by Apple, stapled, zipped (with a
+# manifest of the commits and hash it came from, tools/manifest.sh). Nothing
 # is published: the zip in build/ is what a GitHub release or the Homebrew
 # tap would take, when that day comes.
 #
@@ -88,7 +89,8 @@ fi
 
 rm -f "$zip"
 ditto -c -k --keepParent "$app" "$zip"
-echo "$zip ($(du -h "$zip" | cut -f1))"
+tools/manifest.sh "$zip" >"$zip.manifest"
+echo "$zip ($(du -h "$zip" | cut -f1)), $zip.manifest"
 
 if [ "$install" = 1 ]; then
     if pgrep -xq fosforo; then

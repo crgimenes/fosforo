@@ -257,6 +257,37 @@ func sshThroughput() throws {
   #expect(throws: SSHError.self) { try SSHClient(config: strict).connect() }
 }
 
+@Test func anAcceptedUnknownKeyIsThatKeyOnly() throws {
+  let server = try Server()
+  var c = try server.config(command: "true")
+  c.acceptNewHostKeys = false
+  var shown: [UInt8] = []
+  do {
+    try SSHClient(config: c).connect()
+    Issue.record("connected to an unknown host")
+  } catch SSHError.unknownHostKey(_, let key) {
+    shown = key
+  }
+  // yes to another fingerprint (the connection was swapped in between)
+  c.acceptedHostKey = PrivateKey.ed25519(.init()).publicBlob
+  #expect(throws: SSHError.unknownHostKey(host: "127.0.0.1", key: shown)) {
+    try SSHClient(config: c).connect()
+  }
+  #expect(!FileManager.default.fileExists(atPath: server.knownHosts.path))
+  c.acceptedHostKey = shown
+  let client = SSHClient(config: c)
+  let out = Collector()
+  out.attach(client)
+  try client.connect()
+  client.start()
+  #expect(out.wait())
+  guard case .known = server.knownHosts.check(host: "127.0.0.1", port: server.port, blob: shown)
+  else {
+    Issue.record("the accepted key was not recorded")
+    return
+  }
+}
+
 @Test func aWrongKeyIsRefused() throws {
   let server = try Server()
   var cfg = try server.config()
@@ -780,6 +811,14 @@ private func infoRequest(_ prompts: [(String, Bool)]) -> [UInt8] {
   let i = bytes.count - 60
   bytes[i] = bytes[i] == "A" ? "B" : "A"
   #expect(throws: SSHError.self) { try vault.open(String(bytes)) }
+  let header = Vault.header
+  let footer = "-----END FOSFORO PROTECTED KEY-----"
+  for text in [
+    footer + "\nAAAA\n" + header + "\n", header + "\nAAAA\n", header, header + footer,
+    header + "\n" + header + "\n" + footer, "x",
+  ] {
+    #expect(throws: SSHError.self) { try vault.open(text) }
+  }
 }
 
 /// A connection to a forward here whose reads give up after 5 s: a forward
@@ -950,4 +989,91 @@ private func freePort() -> Int {
   let no = try banner(
     [5, 1, 0, 5, 1, 0, 1, 127, 0, 0, 1, UInt8(closed >> 8), UInt8(closed & 0xFF)], 12)
   #expect(no.ok[2] == 5 && no.ok[3] != 0)
+}
+
+/// A channel whose client writes plain packets to a socketpair; the other
+/// end is returned, non-blocking.
+private func wiredChannel() -> (SSHClient, SSHChannel, Int32) {
+  var pair: [Int32] = [0, 0]
+  _ = socketpair(AF_UNIX, SOCK_STREAM, 0, &pair)
+  var one: Int32 = 1
+  setsockopt(pair[0], SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+  _ = fcntl(pair[1], F_SETFL, O_NONBLOCK)
+  let client = SSHClient(
+    config: SSHConfig(host: "x", user: "u", knownHosts: KnownHosts(path: "/nonexistent")))
+  client.io = PacketIO(fd: pair[0])
+  let ch = SSHChannel(client: client, id: 0)
+  client.channels[0] = ch
+  return (client, ch, pair[1])
+}
+
+/// The data of each CHANNEL_DATA packet waiting on fd.
+private func channelData(_ fd: Int32) -> [[UInt8]] {
+  var raw: [UInt8] = []
+  var buf = [UInt8](repeating: 0, count: 65536)
+  while true {
+    let n = read(fd, &buf, buf.count)
+    guard n > 0 else { break }
+    raw += buf[0..<n]
+  }
+  var out: [[UInt8]] = []
+  var at = 0
+  while at + 5 <= raw.count {
+    var head = SSHReader(Array(raw[at..<at + 5]))
+    let len = Int((try? head.u32()) ?? 0)
+    let pad = Int((try? head.byte()) ?? 0)
+    var p = SSHReader(Array(raw[at + 5..<at + 4 + len - pad]))
+    at += 4 + len
+    if (try? p.byte()) == Msg.channelData, (try? p.u32()) != nil, let d = try? p.string() {
+      out.append(d)
+    }
+  }
+  return out
+}
+
+@Test(arguments: [1, 63, 64, 65, 32768] as [UInt32])
+func everyPacketMaximumMakesProgress(most: UInt32) {
+  let (client, ch, peer) = wiredChannel()
+  defer { close(peer) }
+  ch.remoteWindow = 65536
+  ch.remoteMax = most
+  ch.send(Array(repeating: 0x61, count: 300))
+  let packets = channelData(peer)
+  #expect(packets.reduce(0) { $0 + $1.count } == 300)
+  #expect(packets.allSatisfy { $0.count <= Int(most) })
+  _ = client
+}
+
+@Test func aZeroPacketMaximumRefusesTheChannel() throws {
+  let (client, ch, peer) = wiredChannel()
+  defer { close(peer) }
+  var w = SSHWriter(message: Msg.channelOpenConfirmation)
+  w.u32(0)
+  w.u32(7)
+  w.u32(65536)
+  w.u32(0)
+  try client.handle(w.bytes)
+  #expect(throws: SSHError.self) { try ch.await(1) }
+}
+
+@Test func aFailedWindowAdjustReleasesTheLock() {
+  let (client, ch, peer) = wiredChannel()
+  close(peer)  // every write fails from here
+  #expect(throws: SSHError.self) {
+    try ch.received([UInt8](repeating: 0, count: Int(SSHClient.window)))
+  }
+  #expect(client.lock.try())
+  client.lock.unlock()
+}
+
+@Test func aTruncatedExitStatusReleasesTheLock() {
+  let (client, _, peer) = wiredChannel()
+  defer { close(peer) }
+  var w = SSHWriter(message: Msg.channelRequest)
+  w.u32(0)
+  w.string("exit-status")
+  w.bool(false)
+  #expect(throws: SSHError.self) { try client.handle(w.bytes) }
+  #expect(client.lock.try())
+  client.lock.unlock()
 }

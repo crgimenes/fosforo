@@ -76,9 +76,14 @@ int main(int argc, char **argv) {
     size_of(&cols, &rows);
     char host[64] = "";
     gethostname(host, sizeof(host) - 1);
-    host[strcspn(host, ".")] = '\0'; /* "box", not "box.local" */
+    char *dot = strchr(host, '.');
+    if (dot != NULL) {
+        *dot = '\0'; /* "box", not "box.local" */
+    }
     froc *s = froc_new(argv[1], getenv("USER"), host, NULL, cols, rows);
     if (s == NULL) {
+        /* to a stream: nothing to bound */
+        /* NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling) */
         fprintf(stderr, "fosforo-roc: %s: %s\n", argv[1], strerror(errno));
         return 1;
     }

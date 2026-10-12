@@ -81,26 +81,41 @@ terminal,ssh,mosh,shell,console,unix,command line,sysadmin,server,vt100,ansi,key
 
 ## App Privacy (nutrition label)
 
-Data Not Collected. fosforo has no analytics, crash reporting, advertising
-or accounts; what the person types, their files and keys stay on the
-device (and in their own iCloud Drive, when they choose to use it).
+Data Not Collected: nothing reaches the author or a partner. fosforo has
+no analytics, crash reporting, advertising or accounts. It does send data
+off the device, but only where the person sends it: SSH and Mosh to the
+servers they name, and ~/iCloud to their own iCloud Drive. The policy
+(web/index.html, #privacy) says what happens to keys: plain files in
+~/.ssh until `key protect`, out of backups, and sealed without a presence
+check on a device with no passcode. Settings > About > Privacy Policy
+opens it in the app.
 
 ## Age rating
 
-Every content question "None"; no unrestricted web access (there is no
-browser); no user-generated content shared through the app. Expected:
-4+.
+Answer the questionnaire as it stands when submitting; the rating is
+whatever those answers give. What the app is, for the answers: there is
+no browser and no content of its own beyond the help and the bundled
+programs; nothing a person writes is shared through the app; SSH and
+Mosh reach any server the person names, whose content the app does not
+control.
 
-## Export compliance (CRG decides)
+## Export compliance (decided 2026-10-08)
 
 fosforo implements SSH and Mosh itself (AES-GCM and AES-CTR, AES-128-OCB
 for Mosh, Curve25519 and ML-KEM key exchange, Ed25519, ECDSA and RSA
-signatures): encryption beyond what the operating system provides,
-used to secure communication channels. The likely answer is "uses
-non-exempt encryption" under the mass-market treatment, with the annual
-self-classification report, as other SSH clients do. Once decided, the
-answer can go into Info.plist as ITSAppUsesNonExemptEncryption so App
-Store Connect stops asking per build.
+signatures): standard algorithms, beyond the system's, securing the
+person's own connections.
+
+Answered in App Store Connect for builds 13 and 15: "standard encryption
+algorithms instead of, or in addition to, the operating system's", with
+the app not available in France (no ANSSI declaration). With those
+answers App Store Connect classed the build as needing no documentation
+and suggested the key: `ITSAppUsesNonExemptEncryption` = false in
+assets/Info-iOS.plist, in place since build 16, which then went through
+without the question. False here records that exemption, not an absence
+of cryptography. Territories: 173 (France and mainland China out; China
+needs an ICP number). Revisit if the algorithms or the territories
+change.
 
 ## App Review notes
 
@@ -108,14 +123,22 @@ fosforo is a terminal emulator. It opens in rocchetto, a shell built into
 the app, which works offline with no account or server: try `help`,
 `ls /bin`, `uname -a`, `seq 5 | wc -l`, or `edt notes.txt` (a text editor).
 
-The shell's commands and the scripts the person writes are Filo programs
-that run inside the app's interpreter on the device. The app does not
-download executable code or change its features remotely; everything it
-runs ships in the binary or is written by the user, as in other shell and
-scripting apps.
+The shell's commands are Filo programs shipped in the app; scripts the
+person writes, or brings in through Files or iCloud Drive, run in the same
+interpreter on the device, with the app's sandbox. The app has no
+mechanism of its own to download code or change its features; what the
+person runs on a server over SSH or Mosh runs there, not on the device.
 
-SSH and Mosh connect only to servers the person names. [Demo server: CRG
-decides — host, user and password, or none.]
+SSH and Mosh connect only to servers the person names. A demo server
+for review: `fosforo.crg.eti.br`, user `review` (no sudo, no forwarding;
+SSH and Mosh). Its password goes only in App Store Connect's sign-in
+field for the reviewer, never in this file.
+
+To check the rest: `ssh review@fosforo.crg.eti.br` (answer yes to the
+host key, then the password), `exit`, then `mosh review@fosforo.crg.eti.br`;
+`config` opens Settings (servers, keys, Privacy Policy); Files shows the
+app's folder, and a key opened from Files is offered for ~/.ssh;
+`ssh-keygen -t ed25519` makes a key, `key protect id_ed25519` seals it.
 
 Protected SSH keys ask for Face ID, Touch ID or the passcode; this is the
 NSFaceIDUsageDescription prompt.

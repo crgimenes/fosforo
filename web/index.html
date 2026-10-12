@@ -164,8 +164,10 @@ footer { margin-top: 3.5rem; color: var(--dim); font-size: .9rem; border-top: 1p
 (set on-focus (fn (arg) (theme "default")))</code></pre>
 
 <h2 id="privacy">Privacy</h2>
-<p>fosforo collects no data. It has no analytics, no crash reporting, no advertising and no accounts, and it sends nothing to its author or to anyone else.</p>
-<p>What you type, your files and your keys stay on your device. Files you put in the app's iCloud Drive folder are stored in your own iCloud account. The app connects only to the machines you name, or that a program you run asks for. Removing the app removes everything it stored on the device.</p>
+<p>fosforo collects no data. It has no analytics, no crash reporting, no advertising and no accounts; nothing is sent to its author or to any partner.</p>
+<p>The app connects only to the machines you name, or that a program you run asks for: what an SSH or Mosh session carries goes to that server, encrypted. Files you put in the app's iCloud Drive folder (<code>~/iCloud</code>) are stored by Apple in your own iCloud account; the rest of the home, <code>~/.ssh</code> and <code>~/.config</code> included, stays on the device.</p>
+<p>SSH keys live in <code>~/.ssh</code> inside the app, readable only by it (mode 0600, the strictest file protection iOS offers) and left out of device backups, so they do not travel to a new device. A key is a plain file until you run <code>key protect</code>: then it is sealed by this device's Secure Enclave and each use asks for Face ID, Touch ID or the passcode. On a device with no passcode the seal still works, but nothing is asked; the app says so.</p>
+<p>Removing the app removes everything it stored on the device; files in your iCloud Drive folder stay there until you delete them.</p>
 <p>Questions: <a href="https://github.com/crgimenes/fosforo/issues">open an issue</a>.</p>
 
 <footer>

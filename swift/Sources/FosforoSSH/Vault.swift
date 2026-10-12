@@ -142,7 +142,9 @@ public final class Vault: @unchecked Sendable {
   /// The original key file. On the first use of a session this asks for
   /// the owner.
   public func open(_ text: String) throws -> String {
-    guard let b = text.range(of: Vault.header), let f = text.range(of: Vault.footer) else {
+    guard let b = text.range(of: Vault.header),
+      let f = text.range(of: Vault.footer, range: b.upperBound..<text.endIndex)
+    else {
       throw SSHError.auth("not a protected key")
     }
     let body = text[b.upperBound..<f.lowerBound].split(separator: "\n").filter {

@@ -136,8 +136,11 @@ struct ProtoReader {
       case 0:
         return (key >> 3, .varint(try varint()))
       case 2:
-        let n = Int(try varint())
-        guard n <= data.count - pos else { throw MoshError(description: "field past the end") }
+        let length = try varint()
+        guard length <= UInt64(data.count - pos) else {
+          throw MoshError(description: "field past the end")
+        }
+        let n = Int(length)
         pos += n
         return (key >> 3, .bytes(Array(data[(pos - n)..<pos])))
       case 1:

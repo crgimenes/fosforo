@@ -34,7 +34,7 @@ roc-host:
 	@mkdir -p build
 	$(CC) -O2 $(WARN) $$(cat $(ROC)/build/libroc.cflags) -o build/fosforo-roc rochost/main.c rochost/host.c \
 		$(ROC)/build/libroc.a
-	$(CC) -O1 -g $(WARN) -Irochost $$(cat $(ROC)/build/libroc.cflags) \
+	$(CC) $(SAN) $(WARN) -Irochost $$(cat $(ROC)/build/libroc.cflags) \
 		-DROC_FIXTURES='"$(abspath $(ROC))/test/fixtures/utilities.txt"' \
 		-DROC_COMMANDS='"$(abspath $(ROC))/commands/bin"' -o build/test_rochost \
 		test/test_rochost.c rochost/host.c $(ROC)/build/libroc.a
@@ -113,14 +113,25 @@ fmt:
 fmt-check:
 	$(LLVM)/clang-format --dry-run --Werror $(FMT_FILES)
 
+# The host with rocchetto's own flags (they shape struct roc). C's && gives an
+# int, so roc_host's bool callbacks would need a cast each: that check is off.
 tidy:
 	$(LLVM)/clang-tidy --quiet --warnings-as-errors='*' --checks='$(TIDY_CHECKS)' \
 		$(OWN_C) tools/vtdump.c -- -std=c11 $(INC)
+	$(MAKE) -C $(ROC) lib
+	$(LLVM)/clang-tidy --quiet --warnings-as-errors='*' \
+		--checks='$(TIDY_CHECKS),-readability-implicit-bool-conversion' \
+		rochost/host.c rochost/main.c -- -Irochost $$(cat $(ROC)/build/libroc.cflags)
 
 check:
 	cppcheck --enable=warning,style,performance,portability --inline-suppr \
 		--suppress=missingIncludeSystem --error-exitcode=1 $(INC) \
 		$(OWN_C) tools/vtdump.c test/test_vt.c test/test_glyph.c test/test_pty.c test/test_cfg.c
+	$(MAKE) -C $(ROC) lib
+	cppcheck --enable=warning,style,performance,portability --inline-suppr \
+		--suppress=missingIncludeSystem --suppress=constParameterCallback --error-exitcode=1 \
+		-Irochost $$(tr ' ' '\n' < $(ROC)/build/libroc.cflags | grep '^-[ID]') \
+		rochost/host.c rochost/main.c
 
 # Swift: format checked, every warning an error, Swift 6 strict concurrency.
 swift-fmt:

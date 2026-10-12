@@ -254,6 +254,13 @@
       Hooks.fire("blur")
     }
 
+    /// The window was closed (or the system let it go): its sessions end
+    /// with it, their connections and timers too.
+    func sceneDidDisconnect(_ scene: UIScene) {
+      terminals?.stopAll()
+      window = nil
+    }
+
     func sceneDidEnterBackground(_ scene: UIScene) {
       backgroundSince = Date()
     }
@@ -276,57 +283,81 @@
     static func offer(_ urls: [URL], from controller: UIViewController?) {
       guard let controller, let url = urls.first(where: \.isFileURL) else { return }
       let rest = Array(urls.drop { $0 != url }.dropFirst())
-      let scoped = url.startAccessingSecurityScopedResource()
-      let data = try? Data(contentsOf: url)  // yagni: whole file in memory (keys, configs)
-      if scoped {
-        url.stopAccessingSecurityScopedResource()
+      Task {
+        switch await peek(url) {
+        case .success(let look):
+          ask(url, size: look.size, key: look.key, rest, controller)
+        case .failure(let error):
+          failed(url.lastPathComponent, error, rest, controller)
+        }
       }
-      guard let data else {
-        offer(rest, from: controller)
-        return
-      }
+    }
+
+    private static func ask(
+      _ url: URL, size: Int, key: Bool, _ rest: [URL], _ controller: UIViewController
+    ) {
       let name = url.lastPathComponent
-      let key = PrivateKey.isPrivateKey(String(decoding: data.prefix(64), as: UTF8.self))
-      let home = Theme.home
-      let dest = home.appendingPathComponent(key ? ".ssh/" + name : name)
+      let dest = Theme.home.appendingPathComponent(key ? ".ssh/" + name : name)
       let shown = (key ? "~/.ssh/" : "~/") + name
       let exists = FileManager.default.fileExists(atPath: dest.path)
       let alert = UIAlertController(
         title: (exists ? "Replace " : "Import ") + shown + "?",
-        message: key ? "A private key: kept for this app only, mode 0600." : "\(data.count) bytes.",
+        message: key ? "A private key: kept for this app only, mode 0600." : "\(size) bytes.",
         preferredStyle: .alert)
       alert.addAction(
         UIAlertAction(title: "Cancel", style: .cancel) { _ in offer(rest, from: controller) })
       alert.addAction(
         UIAlertAction(title: exists ? "Replace" : "Import", style: exists ? .destructive : .default)
         { _ in
-          do {
-            try save(data, to: dest, key: key)
-          } catch {
-            let failed = UIAlertController(
-              title: "Could not import \(name)", message: "\(error)", preferredStyle: .alert)
-            failed.addAction(UIAlertAction(title: "OK", style: .default))
-            controller.present(failed, animated: true)
-            return
+          Task {
+            switch await bringIn(url, to: dest, key: key, replace: exists) {
+            case .success: offer(rest, from: controller)
+            case .failure(let error): failed(name, error, rest, controller)
+            }
           }
-          offer(rest, from: controller)
         })
       controller.present(alert, animated: true)
     }
 
-    private static func save(_ data: Data, to dest: URL, key: Bool) throws {
-      if key {
-        var dir = dest.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-          at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        try dir.setResourceValues(values)
+    private static func failed(
+      _ name: String, _ error: Error, _ rest: [URL], _ controller: UIViewController
+    ) {
+      let alert = UIAlertController(
+        title: "Could not import \(name)", message: "\(error)", preferredStyle: .alert)
+      alert.addAction(
+        UIAlertAction(title: "OK", style: .default) { _ in offer(rest, from: controller) })
+      controller.present(alert, animated: true)
+    }
+
+    /// Size and whether it is a key, off the main thread: a file provider
+    /// (iCloud) may take its time, and the file may be anything.
+    nonisolated private static func peek(_ url: URL) async -> Result<(size: Int, key: Bool), Error>
+    {
+      scoped(url) {
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        let h = try FileHandle(forReadingFrom: url)
+        defer { try? h.close() }
+        let head = try h.read(upToCount: 64) ?? Data()
+        return (size, PrivateKey.isPrivateKey(String(decoding: head, as: UTF8.self)))
       }
-      try data.write(to: dest, options: key ? [.atomic, .completeFileProtection] : [.atomic])
-      if key {
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dest.path)
+    }
+
+    nonisolated static func bringIn(_ url: URL, to dest: URL, key: Bool, replace: Bool) async
+      -> Result<Void, Error>
+    {
+      scoped(url) { try Launcher.bringIn(url, to: dest, key: key, replace: replace) }
+    }
+
+    nonisolated private static func scoped<T>(_ url: URL, _ body: () throws -> T) -> Result<
+      T, Error
+    > {
+      let scoped = url.startAccessingSecurityScopedResource()
+      defer {
+        if scoped {
+          url.stopAccessingSecurityScopedResource()
+        }
       }
+      return Result { try body() }
     }
   }
 
@@ -469,13 +500,22 @@
     }
 
     /// A window with no terminal has nothing to show: the last session is
-    /// replaced by a new shell.
+    /// replaced by a new shell, or stays when there can be none.
     @objc func closeSession() {
       guard views.indices.contains(current) else { return }
       let v = views[current]
       if views.count == 1 {
-        try? add()
+        do {
+          try add()
+        } catch {
+          complain("New session", error)
+          return
+        }
       }
+      remove(v)
+    }
+
+    private func remove(_ v: TerminalView) {
       guard let i = views.firstIndex(where: { $0 === v }) else { return }
       views.remove(at: i)
       v.stop()
@@ -484,23 +524,40 @@
       show(min(i < current ? current - 1 : current, views.count - 1))
     }
 
+    /// The scene is gone: every session ends.
+    func stopAll() {
+      for v in views {
+        v.stop()
+        v.removeFromSuperview()
+      }
+      views.removeAll()
+    }
+
+    private func complain(_ title: String, _ error: Error) {
+      let alert = UIAlertController(title: title, message: "\(error)", preferredStyle: .alert)
+      alert.addAction(UIAlertAction(title: "OK", style: .default))
+      present(alert, animated: true)
+    }
+
     /// exit in the shell: the session closes; the last one closes the
     /// window where there are others (iPad), else a new shell takes its
     /// place — an app never quits itself on iOS.
     private func ended(_ v: TerminalView) {
-      guard let i = views.firstIndex(where: { $0 === v }) else { return }
+      guard views.contains(where: { $0 === v }) else { return }
       if views.count == 1 {
         if let scene = view.window?.windowScene, UIApplication.shared.connectedScenes.count > 1 {
+          v.stop()
           UIApplication.shared.requestSceneSessionDestruction(scene.session, options: nil)
           return
         }
-        try? add()
+        do {
+          try add()
+        } catch {
+          complain("New session", error)  // the ended one stays on screen, its output readable
+          return
+        }
       }
-      views.remove(at: i)
-      v.stop()
-      v.removeFromSuperview()
-      Hooks.fire("close")
-      show(min(i < current ? current - 1 : current, views.count - 1))
+      remove(v)
     }
 
     static func applyAll(_ theme: Theme) {
@@ -513,13 +570,20 @@
       }
     }
 
-    /// The settings screen; what it types goes to the session in front.
+    /// The settings screen; what it types goes to a new session, at the
+    /// local prompt for sure (the one in front may be remote, or an editor).
     func showConfig() {
       guard presentedViewController == nil else { return }
       let config = ConfigController(
         ssh: Theme.home.appendingPathComponent(".ssh"),
         run: { [weak self] line in
-          guard let self, self.views.indices.contains(self.current) else { return }
+          guard let self else { return }
+          do {
+            try self.add()
+          } catch {
+            self.complain("New session", error)
+            return
+          }
           self.views[self.current].session.send(line)
         },
         reload: { [weak self] in self?.reloadConfig() })
@@ -534,10 +598,7 @@
       do {
         theme = try Theme.load()
       } catch {
-        let alert = UIAlertController(
-          title: "fosforo config", message: "\(error)", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
+        complain("fosforo config", error)
         return
       }
       TerminalController.applyAll(theme)
@@ -545,10 +606,12 @@
     }
 
     @objc func previousSession() {
+      guard !views.isEmpty else { return }
       show((current + views.count - 1) % views.count)
     }
 
     @objc func nextSession() {
+      guard !views.isEmpty else { return }
       show((current + 1) % views.count)
     }
 

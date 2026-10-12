@@ -378,6 +378,12 @@ func nerdFontIconsComeFromTheSymbolsFont() throws {
 /// text it shrinks into its cell: clipped, its ink would run to the cell's
 /// right edge from top to bottom.
 @Test func narrowEmojiSpreadsOrFitsItsCell() throws {
+  // the app's own 3270, which has no U+2620; where it is not installed (CI)
+  // the theme falls back to Menlo, whose ☠ is a monochrome text glyph
+  let font = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().appendingPathComponent("assets/fonts/3270-Regular.otf")
+  CTFontManagerRegisterFontsForURL(font as CFURL, .process, nil)
   var theme = Theme()
   theme.fontSize = 25
   let r = try Renderer(theme: theme, scale: 2)

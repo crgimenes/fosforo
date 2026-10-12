@@ -4,6 +4,9 @@ LLVM ?= /opt/homebrew/opt/llvm/bin
 FILO_TERM ?= ../filo-term
 FILO ?= ../clang_filo
 ROC ?= ../rocchetto
+# the app's shell without Core War: its classic warriors are other people's
+# work, and a POSIX shell with Filo is the point
+ROC_APPS ?= APPS_COREWAR=0
 
 WARN = -Wall -Wextra -Werror -Wshadow -Wconversion -Wdouble-promotion -Wundef
 INC = -Ivt -Iglyph -Ipty -Iconfig -I$(FILO_TERM)/src -I$(FILO)
@@ -30,7 +33,7 @@ all: build/vtdump lib roc-host
 # which must not meet the app's copies in one binary. The flags come from
 # rocchetto itself (they shape struct roc).
 roc-host:
-	$(MAKE) -C $(ROC) lib
+	$(MAKE) -C $(ROC) lib $(ROC_APPS)
 	@mkdir -p build
 	$(CC) -O2 $(WARN) $$(cat $(ROC)/build/libroc.cflags) -o build/fosforo-roc rochost/main.c rochost/host.c \
 		$(ROC)/build/libroc.a
@@ -43,9 +46,9 @@ roc-host:
 # The C core for the Swift package, macOS + iOS + simulator slices. It only
 # packages: the warning gates are make test, tidy and check.
 xcframework:
-	$(MAKE) -C $(ROC) lib
+	$(MAKE) -C $(ROC) lib $(ROC_APPS)
 	ROC_FLAGS="$$(cat $(ROC)/build/libroc.cflags)" \
-	ROC_SRC="$$($(MAKE) -s -C $(ROC) lib-sources) $(abspath rochost/host.c)" \
+	ROC_SRC="$$($(MAKE) -s -C $(ROC) lib-sources $(ROC_APPS)) $(abspath rochost/host.c)" \
 	tools/xcframework.sh $(CC) "-O2 -std=c11 $(INC)" -- $(OWN_C) $(FILO_TERM)/src/utf8.c $(FILO_SRC)
 
 lib: build/libfosforo.a
@@ -118,7 +121,7 @@ fmt-check:
 tidy:
 	$(LLVM)/clang-tidy --quiet --warnings-as-errors='*' --checks='$(TIDY_CHECKS)' \
 		$(OWN_C) tools/vtdump.c -- -std=c11 $(INC)
-	$(MAKE) -C $(ROC) lib
+	$(MAKE) -C $(ROC) lib $(ROC_APPS)
 	$(LLVM)/clang-tidy --quiet --warnings-as-errors='*' \
 		--checks='$(TIDY_CHECKS),-readability-implicit-bool-conversion' \
 		rochost/host.c rochost/main.c -- -Irochost $$(cat $(ROC)/build/libroc.cflags)
@@ -127,7 +130,7 @@ check:
 	cppcheck --enable=warning,style,performance,portability --inline-suppr \
 		--suppress=missingIncludeSystem --error-exitcode=1 $(INC) \
 		$(OWN_C) tools/vtdump.c test/test_vt.c test/test_glyph.c test/test_pty.c test/test_cfg.c
-	$(MAKE) -C $(ROC) lib
+	$(MAKE) -C $(ROC) lib $(ROC_APPS)
 	cppcheck --enable=warning,style,performance,portability --inline-suppr \
 		--suppress=missingIncludeSystem --suppress=constParameterCallback --error-exitcode=1 \
 		-Irochost $$(tr ' ' '\n' < $(ROC)/build/libroc.cflags | grep '^-[ID]') \

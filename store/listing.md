@@ -21,6 +21,11 @@ Mosh clients, keys guarded by the Secure Enclave, and nothing collected.
 fosforo is a terminal emulator for iPad and iPhone, made for people who
 live on the command line.
 
+- No ads
+- No subscriptions
+- No telemetry
+- Just a good terminal
+
 A SHELL OF ITS OWN
 fosforo starts in rocchetto, a small Unix-like shell built into the app:
 pipes, redirects, variables, functions, history and Tab completion, with
@@ -48,6 +53,8 @@ A REAL TERMINAL
   links you can open.
 - A key bar over the on-screen keyboard, and full hardware keyboard
   support on the iPad, menu bar included.
+- On the iPad, draw over the terminal with Apple Pencil and share the
+  picture.
 
 YOURS TO SHAPE
 Configuration and themes are Filo scripts you can read and edit. Files
@@ -148,11 +155,12 @@ NSFaceIDUsageDescription prompt.
 In `store/screenshots/`, opaque PNG at the exact sizes App Store Connect
 asks for (simulators renamed "iPhone" and "iPad" so the prompt is short):
 
-- iPhone 6.9" (1320 × 2868): `iphone-1-shell.png` (pipelines over the
-  warriors), `iphone-2-corewar.png` (Core War, Paper against Scanner).
+- iPhone 6.9" (1320 × 2868): `iphone-1-shell.png` (pipelines in the
+  built-in shell), `iphone-3-ssh-htop.png` (htop over SSH).
 - iPad 13" (2064 × 2752): `ipad-1-shell.png` (Gohan's greeting, the
-  commands, a pipeline), `ipad-2-corewar.png` (three warriors, the side
-  panel with each one's code).
+  commands, a pipeline).
 
-Still to make: an SSH session (needs the demo server) and the phosphor
-theme.
+The iOS build has no Core War, so its shots are gone, and
+`iphone-1-shell.png` (its pipelines run over the warriors) needs
+retaking. Still to make: an iPad SSH session, the new key bar, and the
+phosphor theme.

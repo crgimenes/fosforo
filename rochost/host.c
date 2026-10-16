@@ -57,6 +57,8 @@ struct froc {
     size_t cmd_len;
     froc_clipboard_get clip_get;
     froc_clipboard_put clip_put;
+    froc_complete complete;
+    void *complete_ctx;
     void *clip_ctx;
     atomic_bool interrupt;  /* a Ctrl-C typed while the session ran (any thread) */
     froc_busy_out busy_out; /* what a long script writes, handed out as it runs */
@@ -384,6 +386,11 @@ static const uint8_t *clipboard_get(void *ctx, size_t *len) {
 static bool clipboard_put(void *ctx, const uint8_t *data, size_t len) {
     const host_state *h = ctx;
     return h->clip_put(h->clip_ctx, data, len);
+}
+
+static const char *complete(void *ctx, const char *command) {
+    const host_state *h = ctx;
+    return h->complete(h->complete_ctx, command);
 }
 
 static void stat_into(const struct stat *st, roc_stat *out) {
@@ -1153,5 +1160,13 @@ void froc_clipboard(froc *h, froc_clipboard_get get, froc_clipboard_put put, voi
     h->clip_ctx = ctx;
     h->m.host.clipboard_get = get != NULL ? clipboard_get : NULL;
     h->m.host.clipboard_put = put != NULL ? clipboard_put : NULL;
+    pthread_mutex_unlock(&entry);
+}
+
+void froc_completer(froc *h, froc_complete cb, void *ctx) {
+    pthread_mutex_lock(&entry);
+    h->complete = cb;
+    h->complete_ctx = ctx;
+    h->m.host.complete = cb != NULL ? complete : NULL;
     pthread_mutex_unlock(&entry);
 }

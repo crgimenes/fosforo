@@ -261,7 +261,7 @@ public final class Launcher: Transport, @unchecked Sendable {
       }
     case "key":
       do {
-        let line = try deviceKey().authorizedKey + " fosforo"
+        let line = try devicePublicLine()
         try (line + "\n").write(
           to: deviceDirectory.appendingPathComponent("device.pub"), atomically: true,
           encoding: .utf8)
@@ -547,7 +547,7 @@ public final class Launcher: Transport, @unchecked Sendable {
       }
     }
     guard rest.count == 1 || (rest.count == 3 && rest[0] == "-p") else { throw usage }
-    var line = try deviceKey().authorizedKey + " fosforo"
+    var line = try devicePublicLine()
     if let identity {
       line = try publicKey(of: expand(identity))
     }
@@ -644,8 +644,11 @@ public final class Launcher: Transport, @unchecked Sendable {
 
   private var deviceDirectory: URL { ssh }
 
+  /// The device key as a line of authorized_keys; made when there is none.
+  public func devicePublicLine() throws -> String { try deviceKey().authorizedKey + " fosforo" }
+
   /// Where the device key lives, for the `key` command.
-  var deviceKeyKind: String {
+  public var deviceKeyKind: String {
     FileManager.default.fileExists(
       atPath: deviceDirectory.appendingPathComponent("device_p256_se").path)
       ? "Secure Enclave" : "file"

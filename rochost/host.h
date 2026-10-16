@@ -57,6 +57,12 @@ typedef const uint8_t *(*froc_clipboard_get)(void *ctx, size_t *len);
 typedef bool (*froc_clipboard_put)(void *ctx, const uint8_t *data, size_t len);
 void froc_clipboard(froc *h, froc_clipboard_get get, froc_clipboard_put put, void *ctx);
 
+/* Tab on a word after one of the app's commands: the words it may be
+   (ssh's servers), space-separated, valid until the next call; NULL: a
+   path, as after any command. Called on the session's thread. */
+typedef const char *(*froc_complete)(void *ctx, const char *command);
+void froc_completer(froc *h, froc_complete cb, void *ctx);
+
 /* Files kept elsewhere until opened, which the disk shows as .name.icloud
    placeholders (iCloud Drive): the app gives the size the file has, and
    brings it to the disk when asked, blocking until it is there (or not:

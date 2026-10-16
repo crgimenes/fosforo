@@ -95,3 +95,24 @@ private let sample = """
   f.save(h)
   #expect(f.text == "Host a\n  User u\n")
 }
+
+/// The default key lives in `Host *`, made at the end when there is none;
+/// clearing it takes only its line.
+@Test func hostsFileDefaultIdentity() {
+  var f = SSHHostsFile(sample)
+  #expect(f.defaultIdentity == "")
+  f.defaultIdentity = "~/.ssh/id_rsa_backup"
+  #expect(
+    f.text.hasSuffix("Host *\n  IdentityFile ~/.ssh/id_rsa_backup\n  ServerAliveInterval 30\n"))
+  f.defaultIdentity = "~/.ssh/k"
+  #expect(f.defaultIdentity == "~/.ssh/k")
+  f.defaultIdentity = ""
+  #expect(f.text == SSHHostsFile(sample).text)
+
+  var g = SSHHostsFile("Host a\n  User u\n")
+  g.defaultIdentity = ""
+  #expect(g.text == "Host a\n  User u\n")
+  g.defaultIdentity = "~/.ssh/k"
+  #expect(g.text == "Host a\n  User u\n\nHost *\n  IdentityFile ~/.ssh/k\n")
+  #expect(g.hosts.map(\.alias) == ["a"])
+}

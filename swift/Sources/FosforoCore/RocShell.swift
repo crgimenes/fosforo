@@ -41,6 +41,11 @@
     public var clipboardWrite: (@Sendable (String) -> Void)?
     private var clip: [UInt8] = []  // pbpaste's bytes, valid until the next read
 
+    /// Tab on a word after one of `commands`: the words it may be (ssh's
+    /// servers), on the shell's thread; nil leaves it a path.
+    public var complete: (@Sendable (String) -> [String]?)?
+    private var words: [CChar] = []  // complete's answer, valid until the next call
+
     /// Where the shell is, as a path of its own tree (/home/<user>/...):
     /// what a new session's `directory` takes to open there.
     public var directory: String? {
@@ -131,6 +136,12 @@
           me.clipboardWrite?(
             String(decoding: UnsafeBufferPointer(start: data, count: n), as: UTF8.self))
           return me.clipboardWrite != nil
+        }, Unmanaged.passUnretained(self).toOpaque())
+      froc_completer(
+        s,
+        { ctx, command in
+          let me = Unmanaged<RocShell>.fromOpaque(ctx!).takeUnretainedValue()
+          return me.completion(String(cString: command!))
         }, Unmanaged.passUnretained(self).toOpaque())
       if let d = startDirectory {
         _ = froc_chdir(s, d)  // not a directory any more: the home, quietly
@@ -260,6 +271,12 @@
         }
       }
       return widest
+    }
+
+    private func completion(_ command: String) -> UnsafePointer<CChar>? {
+      guard let list = complete?(command) else { return nil }
+      words = Array(list.joined(separator: " ").utf8CString)
+      return words.withUnsafeBufferPointer { $0.baseAddress }
     }
 
     /// The clipboard as bytes the C side may keep until the next call.

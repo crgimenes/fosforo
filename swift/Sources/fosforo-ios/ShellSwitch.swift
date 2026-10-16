@@ -1,6 +1,7 @@
 #if os(iOS)
   import FosforoCore
   import FosforoMosh
+  import FosforoSSH
   import Foundation
   import UIKit
 
@@ -30,6 +31,11 @@
       shell.onCommand = { [weak self] words in self?.toLauncher(words) }
       shell.clipboardRead = { UIPasteboard.general.string }
       shell.clipboardWrite = { UIPasteboard.general.string = $0 }
+      let config = home.appendingPathComponent(".ssh/config")
+      shell.complete = { command in
+        ["ssh", "mosh", "ssh-copy-id"].contains(command)
+          ? SSHHostsFile(contentsOf: config).hosts.map(\.alias) : nil
+      }
     }
 
     func start(

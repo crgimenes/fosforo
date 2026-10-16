@@ -21,10 +21,11 @@
     private var themes: [String] = []
     private var settings = SettingsFile("")
     private var theme = Theme()
-    private var notice: String?  // init.filo set what this screen just changed
+    private var defaultKey = ""  // IdentityFile of Host *
+    private var notice: (Section, String)?  // init.filo set what this screen just changed
 
     private enum Section: Int, CaseIterable {
-      case servers, keys, appearance, about
+      case servers, keys, device, appearance, about
     }
 
     init(ssh: URL, run: @escaping (String) -> Void, reload: @escaping () -> Void) {
@@ -53,7 +54,9 @@
     private var configFile: URL { ssh.appendingPathComponent("config") }
 
     private func refresh() {
-      hosts = SSHHostsFile(contentsOf: configFile).hosts
+      let file = SSHHostsFile(contentsOf: configFile)
+      hosts = file.hosts
+      defaultKey = file.defaultIdentity
       keys = Launcher.keys(in: ssh)
       settings = SettingsFile(contentsOf: SettingsFile.url)
       theme = (try? Theme.load()) ?? Theme()
@@ -89,6 +92,7 @@
       switch Section(rawValue: section) {
       case .servers: hosts.count + 1
       case .keys: keys.count + 2
+      case .device: 4
       case .appearance: 4
       case .about: 4
       case nil: 0
@@ -98,7 +102,7 @@
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int)
       -> String?
     {
-      ["Servers", "Keys", "Appearance", "About"][section]
+      ["Servers", "Keys", "This Device", "Appearance", "About"][section]
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int)
@@ -108,8 +112,11 @@
       case .servers:
         "~/.ssh/config: `ssh NAME` connects, over Mosh where Mosh is on."
       case .keys: "~/.ssh"
+      case .device:
+        notice(.device)
+          ?? "User and Host Name: the prompt and ssh's login, in new sessions. Default Key: Host * in ~/.ssh/config; Automatic tries id_rsa, id_ecdsa, id_ed25519, then the device key."
       case .appearance:
-        notice ?? "~/.config/fosforo/settings.filo; init.filo runs after it and wins."
+        notice(.appearance) ?? "~/.config/fosforo/settings.filo; init.filo runs after it and wins."
       default: nil
       }
     }
@@ -144,6 +151,24 @@
           c.text = indexPath.row == keys.count ? "New Key…" : "Import from Files…"
           c.textProperties.color = .tintColor
         }
+      case .device:
+        switch indexPath.row {
+        case 0:
+          return setting("User", "User", theme.user, placeholder: deviceUser) { $0.user }
+        case 1:
+          return setting("Host Name", "HostName", theme.hostName, placeholder: deviceHost) {
+            $0.hostName
+          }
+        case 2:
+          c.text = "Default Key"
+          c.secondaryText =
+            defaultKey.isEmpty ? "Automatic" : (defaultKey as NSString).lastPathComponent
+          cell.accessoryType = .disclosureIndicator
+        default:
+          c.text = "Device Key"
+          c.secondaryText = Launcher(ssh: ssh).deviceKeyKind
+          cell.accessoryType = .disclosureIndicator
+        }
       case .appearance:
         switch indexPath.row {
         case 0:
@@ -156,7 +181,7 @@
           step.addAction(
             UIAction { [weak self] a in
               guard let s = a.sender as? UIStepper else { return }
-              self?.change("FontSize", { $0.set("FontSize", number: s.value) }) {
+              self?.change("FontSize", in: .appearance, { $0.set("FontSize", number: s.value) }) {
                 $0.fontSize == s.value
               }
             }, for: .valueChanged)
@@ -228,10 +253,14 @@
         } else {
           importKey()
         }
+      case .device where indexPath.row == 2:
+        pickDefaultKey(at: tableView.cellForRow(at: indexPath))
+      case .device where indexPath.row == 3:
+        deviceKeyActions(at: tableView.cellForRow(at: indexPath))
       case .appearance where indexPath.row == 1:
         navigationController?.pushViewController(
           ThemePicker(themes: themes, current: settings.theme) { [weak self] name in
-            self?.change("a theme", { $0.theme = name }) { _ in true }
+            self?.change("a theme", in: .appearance, { $0.theme = name }) { _ in true }
           }, animated: true)
       case .about where indexPath.row == 1:
         type(["help"])
@@ -247,6 +276,75 @@
       }
     }
 
+    // MARK: - device
+
+    /// A text setting of settings.filo, written when the field is left;
+    /// empty takes the line out, back to the device's own.
+    private func setting(
+      _ label: String, _ key: String, _ value: String, placeholder: String,
+      shows: @escaping (Theme) -> String
+    ) -> UITableViewCell {
+      let cell = FieldCell(label: label, value: value, placeholder: placeholder)
+      cell.onEnd = { [weak self] text in
+        let v = text.trimmingCharacters(in: .whitespaces)
+        guard v != value else { return }
+        let odd = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
+        guard !v.unicodeScalars.contains(where: odd.contains) else {
+          self?.alert(label, "One word, without spaces.")
+          self?.tableView.reloadData()
+          return
+        }
+        self?.change(
+          key, in: .device,
+          { v.isEmpty ? $0.unset(key) : $0.set(key, string: v) },
+          took: { shows($0) == v })
+      }
+      return cell
+    }
+
+    private func pickDefaultKey(at cell: UITableViewCell?) {
+      let sheet = UIAlertController(
+        title: "Default Key", message: "For every server without a key of its own.",
+        preferredStyle: .actionSheet)
+      for name in ["Automatic"] + keys.map(\.name) {
+        sheet.addAction(
+          UIAlertAction(title: name, style: .default) { [weak self] _ in
+            guard let self else { return }
+            var f = SSHHostsFile(contentsOf: self.configFile)
+            f.defaultIdentity = name == "Automatic" ? "" : "~/.ssh/" + name
+            do {
+              try f.write(to: self.configFile)
+            } catch {
+              self.alert("~/.ssh/config", "\(error)")
+            }
+            self.refresh()
+          })
+      }
+      sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+      sheet.popoverPresentationController?.sourceView = cell ?? tableView
+      present(sheet, animated: true)
+    }
+
+    private func deviceKeyActions(at cell: UITableViewCell?) {
+      let line: String
+      do {
+        line = try Launcher(ssh: ssh).devicePublicLine()
+      } catch {
+        alert("Device Key", "\(error)")
+        return
+      }
+      let sheet = UIAlertController(
+        title: "Device Key", message: line, preferredStyle: .actionSheet)
+      sheet.addAction(
+        UIAlertAction(title: "Copy Public Key", style: .default) { _ in
+          UIPasteboard.general.string = line
+        })
+      sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+      sheet.popoverPresentationController?.sourceView = cell ?? tableView
+      present(sheet, animated: true)
+      refresh()  // made just now, when there was none
+    }
+
     // MARK: - appearance
 
     private func toggle(
@@ -259,7 +357,7 @@
         UIAction { [weak self] a in
           guard let sw = a.sender as? UISwitch else { return }
           let want = sw.isOn
-          self?.change(key, { apply(want, &$0) }) { shows($0) == want }
+          self?.change(key, in: .appearance, { apply(want, &$0) }) { shows($0) == want }
         }, for: .valueChanged)
       return s
     }
@@ -268,7 +366,8 @@
     /// window. took: whether the theme now shows the change; when it does
     /// not, init.filo set that key over it, and the footer says so.
     private func change(
-      _ key: String, _ edit: (inout SettingsFile) -> Void, took: @escaping (Theme) -> Bool
+      _ key: String, in section: Section, _ edit: (inout SettingsFile) -> Void,
+      took: @escaping (Theme) -> Bool
     ) {
       var s = SettingsFile(contentsOf: SettingsFile.url)
       edit(&s)
@@ -280,8 +379,14 @@
       }
       reload()
       refresh()
-      notice = took(theme) ? nil : "init.filo sets \(key), and what it sets wins over this screen."
-      tableView.reloadSections(IndexSet(integer: Section.appearance.rawValue), with: .none)
+      notice =
+        took(theme)
+        ? nil : (section, "init.filo sets \(key), and what it sets wins over this screen.")
+      tableView.reloadSections(IndexSet(integer: section.rawValue), with: .none)
+    }
+
+    private func notice(_ section: Section) -> String? {
+      notice?.0 == section ? notice?.1 : nil
     }
 
     // MARK: - keys
@@ -571,6 +676,7 @@
   final class FieldCell: UITableViewCell, UITextFieldDelegate {
     let field = UITextField()
     var onChange: ((String) -> Void)?
+    var onEnd: ((String) -> Void)?
 
     init(label: String, value: String, placeholder: String) {
       super.init(style: .default, reuseIdentifier: nil)
@@ -588,6 +694,8 @@
       field.delegate = self
       field.addAction(
         UIAction { [weak self] _ in self?.onChange?(self?.field.text ?? "") }, for: .editingChanged)
+      field.addAction(
+        UIAction { [weak self] _ in self?.onEnd?(self?.field.text ?? "") }, for: .editingDidEnd)
       let row = UIStackView(arrangedSubviews: [name, field])
       row.spacing = 12
       row.translatesAutoresizingMaskIntoConstraints = false

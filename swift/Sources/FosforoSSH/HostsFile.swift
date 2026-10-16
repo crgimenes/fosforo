@@ -104,6 +104,39 @@ public struct SSHHostsFile: Equatable, Sendable {
     }
   }
 
+  /// IdentityFile of the `Host *` block: the key for every server, after
+  /// its own. "" leaves ssh to its defaults (id_*, then the device key).
+  public var defaultIdentity: String {
+    get {
+      guard let b = blocks().first(where: \.star),
+        let i = identityLine(in: b)
+      else { return "" }
+      return SSHHostsFile.keyValue(lines[i])?.1 ?? ""
+    }
+    set {
+      guard let b = blocks().first(where: \.star) else {
+        guard !newValue.isEmpty else { return }
+        if let last = lines.last, !last.trimmingCharacters(in: .whitespaces).isEmpty {
+          lines.append("")
+        }
+        lines += ["Host *", "  IdentityFile \(newValue)"]
+        return
+      }
+      switch (identityLine(in: b), newValue.isEmpty) {
+      case (let i?, true): lines.remove(at: i)
+      case (let i?, false): lines[i] = "  IdentityFile \(newValue)"
+      case (nil, false): lines.insert("  IdentityFile \(newValue)", at: b.start + 1)
+      case (nil, true): break
+      }
+    }
+  }
+
+  private func identityLine(in b: Block) -> Int? {
+    ((b.start + 1)..<b.end).first {
+      SSHHostsFile.keyValue(lines[$0])?.0.lowercased() == "identityfile"
+    }
+  }
+
   /// The alias's block goes, its lines with it.
   public mutating func remove(_ alias: String) {
     guard let b = blocks().first(where: { $0.alias == alias }) else { return }
@@ -142,6 +175,7 @@ public struct SSHHostsFile: Equatable, Sendable {
     var end: Int  // the next block's first line
     var alias: String?  // a single plain name
     var global: Bool
+    var star = false  // `Host *`
   }
 
   private func blocks() -> [Block] {
@@ -155,7 +189,9 @@ public struct SSHHostsFile: Equatable, Sendable {
       let plain =
         k == "host" && names.count == 1 && !names[0].contains(where: { "*?!".contains($0) })
       out.append(
-        Block(start: i, end: lines.count, alias: plain ? String(names[0]) : nil, global: false))
+        Block(
+          start: i, end: lines.count, alias: plain ? String(names[0]) : nil, global: false,
+          star: k == "host" && names == ["*"]))
     }
     return out
   }

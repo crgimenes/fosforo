@@ -382,9 +382,9 @@
   /// bar says n/N): Cmd+T adds one, Cmd+W closes it, Cmd+Left/Right and
   /// Cmd+1..9 switch, as on the Mac.
   /// The device's account: "mobile" on an iPhone or iPad, as its Unix knows it.
-  private let deviceUser = NSUserName().isEmpty ? "mobile" : NSUserName()
+  let deviceUser = NSUserName().isEmpty ? "mobile" : NSUserName()
   /// The device's name as a host name: "iPad Pro" becomes iPad-Pro.
-  @MainActor private var deviceHost: String {
+  @MainActor var deviceHost: String {
     UIDevice.current.name.split(whereSeparator: \.isWhitespace).joined(separator: "-")
   }
 

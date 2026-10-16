@@ -62,6 +62,26 @@ static void test_app_commands(const char *root) {
     froc_free(s);
 }
 
+static const char *servers(void *ctx, const char *command) {
+    (void)ctx;
+    return strcmp(command, "ssh") == 0 ? "euler gauss" : NULL;
+}
+
+/* Tab after ssh offers the app's servers once the completer is given. */
+static void test_completer(const char *root) {
+    froc *s = froc_new(root, "teste", "box", "ssh key", 80, 24);
+    CHECK(s != NULL);
+    take(s);
+    froc_completer(s, servers, NULL);
+    type(s, "ssh crg@eu\t\r");
+    char cmd[256];
+    size_t n = froc_command(s, cmd, sizeof(cmd));
+    CHECK(n == sizeof("ssh\0crg@euler") && memcmp(cmd, "ssh\0crg@euler", n) == 0);
+    froc_done(s, 0);
+    froc_tick(s, 50);
+    froc_free(s);
+}
+
 /* mv on the disk: a file the shell never wrote (put there by the Files
    app, iCloud) moves too, and so does a directory. */
 static void test_mv_on_disk(const char *root) {
@@ -1207,6 +1227,7 @@ int main(void) {
         return 1;
     }
     test_app_commands(root);
+    test_completer(root);
     test_mv_on_disk(root);
     test_history_kept(root);
     test_start_directory(root);

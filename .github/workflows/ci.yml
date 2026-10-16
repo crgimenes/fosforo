@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: crgimenes/rocchetto
-          ref: 1560442dc99dd4baa735705718230a4ab9c1061d
+          ref: 90b2ddab98f93fc325ec6c8b5b0aa34e69ff0c2c
           path: rocchetto
       - uses: actions/checkout@v4
         with:
@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: crgimenes/rocchetto
-          ref: 1560442dc99dd4baa735705718230a4ab9c1061d
+          ref: 90b2ddab98f93fc325ec6c8b5b0aa34e69ff0c2c
           path: rocchetto
       - uses: actions/checkout@v4
         with:
@@ -97,7 +97,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: crgimenes/rocchetto
-          ref: 1560442dc99dd4baa735705718230a4ab9c1061d
+          ref: 90b2ddab98f93fc325ec6c8b5b0aa34e69ff0c2c
           path: rocchetto
       - uses: actions/checkout@v4
         with:
@@ -135,7 +135,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: crgimenes/rocchetto
-          ref: 1560442dc99dd4baa735705718230a4ab9c1061d
+          ref: 90b2ddab98f93fc325ec6c8b5b0aa34e69ff0c2c
           path: rocchetto
       - uses: actions/checkout@v4
         with:

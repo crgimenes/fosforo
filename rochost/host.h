@@ -28,6 +28,12 @@ bool froc_chdir(froc *h, const char *path);
 /* The working directory into out (cap bytes); returns its length, 0 when
    it does not fit. */
 size_t froc_cwd(const froc *h, char *out, size_t cap);
+/* The prompt's user@host from now on, settings changed while the session
+   runs: the home moves with the user (/home/<old> becomes /home/<new>,
+   working directory included; the files stay on the disk where they are).
+   At the prompt it is drawn again; with a command on the terminal the next
+   prompt says it. */
+void froc_identity(froc *h, const char *user, const char *host_name);
 
 void froc_input(froc *h, const uint8_t *data, size_t n);
 /* A Ctrl-C typed while the session is busy: from any thread, at once (a

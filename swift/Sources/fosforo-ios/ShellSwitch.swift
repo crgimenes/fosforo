@@ -47,6 +47,13 @@
       shell.start(output: output, exit: exit)
     }
 
+    /// The settings' user and host name changed: the prompt, and the login
+    /// ssh takes when nothing names one.
+    func identity(user: String, host: String) {
+      launcher.localUser = user
+      shell.identity(user: user, host: host)
+    }
+
     /// `config`: the settings screen, over the terminal; the shell goes on.
     var onConfig: (@MainActor () -> Void)?
 

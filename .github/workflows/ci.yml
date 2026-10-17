@@ -17,30 +17,30 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: fosforo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/rocchetto
           ref: 90b2ddab98f93fc325ec6c8b5b0aa34e69ff0c2c
           path: rocchetto
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
           ref: 86308f3f93e014f3a8bceeb48d5691fb7d1ed2e3
           path: clang_filo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
           ref: 4d652850fdc9019f29bc4c36b7781bc78755dbff
           path: filo-term
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/corewar
           ref: 1ea35b51c0e91e6c47622d278812ad938e53de56
           path: corewar
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/edt
           ref: e6723a37de5ed5b74a9ccb0e5424141437241d8d
@@ -53,30 +53,30 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: fosforo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/rocchetto
           ref: 90b2ddab98f93fc325ec6c8b5b0aa34e69ff0c2c
           path: rocchetto
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
           ref: 86308f3f93e014f3a8bceeb48d5691fb7d1ed2e3
           path: clang_filo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
           ref: 4d652850fdc9019f29bc4c36b7781bc78755dbff
           path: filo-term
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/corewar
           ref: 1ea35b51c0e91e6c47622d278812ad938e53de56
           path: corewar
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/edt
           ref: e6723a37de5ed5b74a9ccb0e5424141437241d8d
@@ -91,30 +91,30 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: fosforo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/rocchetto
           ref: 90b2ddab98f93fc325ec6c8b5b0aa34e69ff0c2c
           path: rocchetto
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
           ref: 86308f3f93e014f3a8bceeb48d5691fb7d1ed2e3
           path: clang_filo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
           ref: 4d652850fdc9019f29bc4c36b7781bc78755dbff
           path: filo-term
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/corewar
           ref: 1ea35b51c0e91e6c47622d278812ad938e53de56
           path: corewar
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/edt
           ref: e6723a37de5ed5b74a9ccb0e5424141437241d8d
@@ -129,30 +129,30 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: fosforo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/rocchetto
           ref: 90b2ddab98f93fc325ec6c8b5b0aa34e69ff0c2c
           path: rocchetto
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
           ref: 86308f3f93e014f3a8bceeb48d5691fb7d1ed2e3
           path: clang_filo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
           ref: 4d652850fdc9019f29bc4c36b7781bc78755dbff
           path: filo-term
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/corewar
           ref: 1ea35b51c0e91e6c47622d278812ad938e53de56
           path: corewar
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crgimenes/edt
           ref: e6723a37de5ed5b74a9ccb0e5424141437241d8d

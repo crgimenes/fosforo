@@ -11,8 +11,9 @@
   public final class RocShell: Transport, @unchecked Sendable {
     private let lock = NSLock()
     private let home: URL
-    private let user: String
-    private let host: String
+    private var user: String
+    private var host: String
+    private var renamed = false  // user or host changed since the session saw them
     private let banner: [UInt8]
     private let bannerNarrow: [UInt8]
     private let greeting: String
@@ -99,10 +100,12 @@
     private func run(_ output: @escaping ([UInt8]) -> Void, _ exit: (Int32) -> Void) {
       lock.lock()
       let first = size
+      let who = (user, host)
+      renamed = false
       lock.unlock()
       guard
         let s = froc_new(
-          home.path, user, host, commands, UInt16(clamping: first.cols),
+          home.path, who.0, who.1, commands, UInt16(clamping: first.cols),
           UInt16(clamping: first.rows))
       else {
         output(Array("rocchetto: cannot open \(home.path)\r\n".utf8))
@@ -191,6 +194,8 @@
         keys.removeAll()
         let newSize = resized ? size : nil
         resized = false
+        let newWho = renamed ? (user, host) : nil
+        renamed = false
         let stop = stopping
         let done = finished
         finished = nil
@@ -203,6 +208,9 @@
         }
         if let d = done {
           froc_done(s, d)
+        }
+        if let w = newWho {
+          froc_identity(s, w.0, w.1)
         }
         if !input.isEmpty {
           active = Date()
@@ -309,6 +317,21 @@
       lock.lock()
       size = (rows, cols)
       resized = true
+      lock.unlock()
+      poke()
+    }
+
+    /// The prompt's user@host from now on (the settings changed): the home
+    /// moves with the user, the files stay where they are.
+    public func identity(user: String, host: String) {
+      lock.lock()
+      guard user != self.user || host != self.host else {
+        lock.unlock()
+        return
+      }
+      self.user = user
+      self.host = host
+      renamed = true
       lock.unlock()
       poke()
     }

@@ -387,6 +387,13 @@
   @MainActor var deviceHost: String {
     UIDevice.current.name.split(whereSeparator: \.isWhitespace).joined(separator: "-")
   }
+  /// The prompt's user@host: the settings', else the device's own.
+  @MainActor func identity(_ theme: Theme) -> (user: String, host: String) {
+    (
+      theme.user.isEmpty ? deviceUser : theme.user,
+      theme.hostName.isEmpty ? deviceHost : theme.hostName
+    )
+  }
 
   @MainActor
   final class TerminalController: UIViewController {
@@ -432,13 +439,12 @@
       let home = Theme.home
       let launcher = Launcher(ssh: home.appendingPathComponent(".ssh"))
       launcher.clipboard = { UIPasteboard.general.string }
-      let user = theme.user.isEmpty ? deviceUser : theme.user
-      launcher.localUser = user
+      let who = identity(theme)
+      launcher.localUser = who.user
       let banner = art(theme.banner, default: Theme().banner, bundled: "banner")
       let narrow = art(theme.bannerNarrow, default: Theme().bannerNarrow, bundled: "banner-narrow")
       let shell = try ShellSwitch(
-        home: home, launcher: launcher, user: user,
-        host: theme.hostName.isEmpty ? deviceHost : theme.hostName, banner: banner,
+        home: home, launcher: launcher, user: who.user, host: who.host, banner: banner,
         bannerNarrow: narrow, greeting: theme.greeting, directory: directory, rows: theme.rows,
         cols: theme.cols)
       shell.onConfig = { [weak self] in self?.showConfig() }
@@ -578,11 +584,13 @@
     }
 
     static func applyAll(_ theme: Theme) {
+      let who = identity(theme)
       for scene in UIApplication.shared.connectedScenes {
         let c = (scene as? UIWindowScene)?.keyWindow?.rootViewController as? TerminalController
         c?.theme = theme
         for v in c?.views ?? [] {
           v.apply(theme)
+          (v.session.transport as? ShellSwitch)?.identity(user: who.user, host: who.host)
         }
       }
     }

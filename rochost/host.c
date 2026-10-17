@@ -971,6 +971,19 @@ static bool do_fmsh_chdir(froc *h, const char *path) {
     return true;
 }
 
+static void do_fmsh_identity(froc *h, const char *user, const char *host_name) {
+    snprintf(h->user, sizeof(h->user), "%s", user != NULL ? user : "");
+    snprintf(h->host, sizeof(h->host), "%s", host_name != NULL ? host_name : "");
+    roc_set_user(&h->m, h->user); /* renames /home/<old> in the store, cwd included */
+    mount_for(h->user, h->mount, sizeof(h->mount));
+    if (h->m.mode != ROC_MODE_LINE || h->m.hosted || h->m.list.active || h->m.read_wait) {
+        return;
+    }
+    term_puts(&h->m.t, "\r\x1b[2K");
+    roc_line_repaint(&h->m);
+    drain(h);
+}
+
 static size_t do_fmsh_cwd(const froc *h, char *out, size_t cap) {
     size_t n = strlen(h->m.cwd);
     if (n + 1 > cap) {
@@ -1062,6 +1075,12 @@ size_t froc_cwd(const froc *h, char *out, size_t cap) {
     size_t n = do_fmsh_cwd(h, out, cap);
     pthread_mutex_unlock(&entry);
     return n;
+}
+
+void froc_identity(froc *h, const char *user, const char *host_name) {
+    pthread_mutex_lock(&entry);
+    do_fmsh_identity(h, user, host_name);
+    pthread_mutex_unlock(&entry);
 }
 
 /* No lock: it is called while the session runs, from the thread the keys

@@ -114,7 +114,7 @@
       case .keys: "~/.ssh"
       case .device:
         notice(.device)
-          ?? "User and Host Name: the prompt and ssh's login, in new sessions. Default Key: Host * in ~/.ssh/config; Automatic tries id_rsa, id_ecdsa, id_ed25519, then the device key."
+          ?? "User and Host Name: the prompt and ssh's login, from now on. Default Key: Host * in ~/.ssh/config; Automatic tries id_rsa, id_ecdsa, id_ed25519, then the device key."
       case .appearance:
         notice(.appearance) ?? "~/.config/fosforo/settings.filo; init.filo runs after it and wins."
       default: nil

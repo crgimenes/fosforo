@@ -161,6 +161,41 @@ static void test_start_directory(const char *root) {
     CHECK(rmdir(sub) == 0);
 }
 
+/* User and host name changed in the settings while the shell runs: the
+   prompt says them at once, the home follows the user and its files are
+   still there; with an app command on the terminal nothing is drawn until
+   the command ends. */
+static void test_identity(const char *root) {
+    froc *s = froc_new(root, "teste", "box", "ssh", 80, 24);
+    CHECK(s != NULL);
+    type(s, "echo hi > note.txt\r");
+    CHECK(strstr(take(s), "teste@box") != NULL);
+    froc_identity(s, "ana", "lab");
+    const char *o = take(s);
+    CHECK(strstr(o, "ana@lab") != NULL);
+    CHECK(strstr(o, "teste") == NULL);
+    char cwd[256];
+    CHECK(froc_cwd(s, cwd, sizeof(cwd)) > 0 && strcmp(cwd, "/home/ana") == 0);
+    type(s, "cat note.txt\r");
+    CHECK(strstr(take(s), "hi\r\n") != NULL);
+    type(s, "pwd\r");
+    CHECK(strstr(take(s), "/home/ana\r\n") != NULL);
+    type(s, "ssh x\r");
+    char cmd[64];
+    CHECK(froc_command(s, cmd, sizeof(cmd)) > 0);
+    take(s);
+    froc_identity(s, "bia", "");
+    CHECK(take(s)[0] == '\0');
+    froc_done(s, 0);
+    o = take(s);
+    CHECK(strstr(o, "bia\x1b[0m:") != NULL && strstr(o, "@") == NULL);
+    type(s, "rm note.txt\r");
+    froc_free(s);
+    char path[512];
+    snprintf(path, sizeof(path), "%s/note.txt", root);
+    CHECK(access(path, F_OK) != 0);
+}
+
 /* mkdir and rmdir reach the disk, so an empty folder outlives the session
    and the Files app sees it; a parent that is not there is refused. */
 static void test_directories_reach_the_disk(const char *root) {
@@ -1231,6 +1266,7 @@ int main(void) {
     test_mv_on_disk(root);
     test_history_kept(root);
     test_start_directory(root);
+    test_identity(root);
     test_directories_reach_the_disk(root);
     test_clipboard(root);
     test_placeholders(root);

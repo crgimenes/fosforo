@@ -29,7 +29,7 @@ unzip fosforo-macos.zip
 mv fosforo.app /Applications/
 ```
 
-The iPad and iPhone app is on its way to the App Store. To build from
+The iPad and iPhone app is free on the [App Store](https://apps.apple.com/app/fosforo/id6820452229). To build from
 source, see [Build](#build).
 
 ## Layout

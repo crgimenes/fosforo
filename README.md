@@ -8,6 +8,12 @@ pty, with the system's ssh and git. On the iPad and iPhone the shell is
 app's own SSH and Mosh clients behind the `ssh` and `mosh` commands. The
 same C core and Metal renderer draw both.
 
+<p align="center">
+  <img src="web/ipad-1-shell.jpg" width="400" alt="fosforo on the iPad: the greeting, the commands in /bin and a pipeline">
+  <img src="web/iphone-3-ssh-htop.jpg" width="245" alt="fosforo on the iPhone: htop over SSH">
+  <img src="web/iphone-1-shell.jpg" width="245" alt="fosforo on the iPhone: pipelines in the built-in shell">
+</p>
+
 ## Install
 
 macOS 14 or later, Apple silicon or Intel. With Homebrew:

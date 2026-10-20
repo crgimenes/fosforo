@@ -32,3 +32,7 @@ swift/Frameworks/
 *.cer
 *.ipa
 *.xcarchive/
+
+# launch planning and social material: never public
+store/launch-kit.md
+store/social/

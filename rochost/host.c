@@ -70,8 +70,12 @@ struct froc {
 static froc_placeholder_size ph_size;
 static froc_placeholder_fetch ph_fetch;
 static void *ph_ctx;
+static char ph_pending[2048]; /* asked for in this entry and not here yet: asked once */
 
 typedef struct froc host_state;
+
+static void drain(host_state *h);
+static void out_append(host_state *h, const uint8_t *buf, size_t n);
 
 /* Absolute, with no ".." component; "report..txt" is a name like any other. */
 static bool safe(const char *path) {
@@ -239,9 +243,12 @@ static void walk(host_state *h, const char *rel, int depth) {
     closedir(d);
 }
 
-/* Not on the disk, but its placeholder is: the app brings it, blocking. */
-static int fetched(const char *full) {
-    if (ph_fetch == NULL) {
+/* Not on the disk, but its placeholder is: the app starts bringing it. Not
+   here by the time the app answers, the command fails now, told why, and
+   is typed again once it has arrived: nothing waits here, under the mutex
+   every local session shares. */
+static int fetched(host_state *h, const char *full) {
+    if (ph_fetch == NULL || strcmp(full, ph_pending) == 0) {
         return 0;
     }
     const char *slash = strrchr(full, '/');
@@ -251,7 +258,19 @@ static int fetched(const char *full) {
     char marker[2100];
     snprintf(marker, sizeof(marker), "%.*s/.%s.icloud", (int)(slash - full), full, slash + 1);
     struct stat st;
-    return stat(marker, &st) == 0 && ph_fetch(ph_ctx, full);
+    if (stat(marker, &st) != 0) {
+        return 0;
+    }
+    if (ph_fetch(ph_ctx, full)) {
+        return 1;
+    }
+    snprintf(ph_pending, sizeof(ph_pending), "%s", full);
+    char msg[2200];
+    int n = snprintf(msg, sizeof(msg), "%s: coming from iCloud; try again when it has arrived\r\n",
+                     slash + 1);
+    drain(h); /* the command's echo first */
+    out_append(h, (const uint8_t *)msg, (size_t)n);
+    return 0;
 }
 
 static const uint8_t *file_get(void *ctx, const char *path, size_t *len) {
@@ -261,7 +280,7 @@ static const uint8_t *file_get(void *ctx, const char *path, size_t *len) {
         return NULL;
     }
     FILE *f = fopen(full, "rb");
-    if (f == NULL && fetched(full)) {
+    if (f == NULL && fetched(h, full)) {
         f = fopen(full, "rb");
     }
     if (f == NULL) {
@@ -567,7 +586,7 @@ typedef struct {
 } host_file;
 
 static int fh_open(void *ctx, const char *path, int mode, void **h, uint64_t *size) {
-    const host_state *hs = ctx;
+    host_state *hs = ctx;
     char full[2048];
     if (!full_path(hs, path, full, sizeof(full))) {
         return ROC_HOST_NOT_MINE;
@@ -581,7 +600,7 @@ static int fh_open(void *ctx, const char *path, int mode, void **h, uint64_t *si
     struct stat st;
     if (mode == ROC_FH_READ) {
         f->fd = open(full, O_RDONLY);
-        if (f->fd < 0 && fetched(full)) {
+        if (f->fd < 0 && fetched(hs, full)) {
             f->fd = open(full, O_RDONLY);
         }
     } else if (!parents(hs, full)) {
@@ -658,12 +677,7 @@ static void on_request(void *ctx, uint32_t req_id, const char *path) {
 
 /* The shell's terminal output into out, which grows: the host takes it when
    it can (froc_output), and the core needs draining between feeds. */
-static void drain(host_state *h) {
-    uint8_t buf[TERM_OUT_CAP];
-    size_t n = term_out_read(&h->m.t, buf, sizeof(buf));
-    if (n == 0) {
-        return;
-    }
+static void out_append(host_state *h, const uint8_t *buf, size_t n) {
     if (h->out_len + n > h->out_cap) {
         size_t cap = h->out_cap == 0 ? 65536 : h->out_cap * 2;
         while (cap < h->out_len + n) {
@@ -678,6 +692,14 @@ static void drain(host_state *h) {
     }
     memcpy(h->out + h->out_len, buf, n);
     h->out_len += n;
+}
+
+static void drain(host_state *h) {
+    uint8_t buf[TERM_OUT_CAP];
+    size_t n = term_out_read(&h->m.t, buf, sizeof(buf));
+    if (n > 0) {
+        out_append(h, buf, n);
+    }
 }
 
 static void feed_bytes(host_state *h, uint32_t id, const uint8_t *data, size_t len) {
@@ -994,6 +1016,7 @@ static size_t do_fmsh_cwd(const froc *h, char *out, size_t cap) {
 }
 
 static void do_fmsh_input(froc *h, const uint8_t *data, size_t n) {
+    ph_pending[0] = '\0';
     settle(h);
     roc_input(&h->m, data, n);
     drain(h);
@@ -1002,6 +1025,7 @@ static void do_fmsh_input(froc *h, const uint8_t *data, size_t n) {
 }
 
 static void do_fmsh_tick(froc *h, uint32_t ms) {
+    ph_pending[0] = '\0';
     settle(h);
     roc_tick(&h->m, ms);
     drain(h);

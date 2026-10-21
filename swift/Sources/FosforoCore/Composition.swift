@@ -31,6 +31,17 @@ public struct Composition: Equatable, Sendable {
     selection = NSRange(location: r.location + new.utf16.count, length: 0)
   }
 
+  /// deleteBackward while composing: the selection goes, or the character
+  /// before the caret; nothing reaches the host.
+  public mutating func deleteBackward() {
+    var r = selection
+    if r.length == 0 {
+      guard r.location > 0 else { return }
+      r = (text as NSString).rangeOfComposedCharacterSequence(at: r.location - 1)
+    }
+    replace(r, with: "")
+  }
+
   public func text(in range: NSRange) -> String {
     (text as NSString).substring(with: clamped(range))
   }

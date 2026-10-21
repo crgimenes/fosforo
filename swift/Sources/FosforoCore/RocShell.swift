@@ -237,8 +237,9 @@
     }
 
     /// iCloud Drive files not downloaded yet (the disk shows .name.icloud)
-    /// are listed by their names with their sizes, and brought down when
-    /// read, as the Files app does. Once, before the first session.
+    /// are listed by their names with their sizes; reading one starts its
+    /// download, and the shell says to try again once it is here. Once,
+    /// before the first session.
     public static func resolvePlaceholders() {
       froc_placeholders(
         { _, path, size in
@@ -248,16 +249,10 @@
           return true
         },
         { _, path in
+          // no waiting: the host asks under the lock every local session shares
           let url = URL(fileURLWithPath: String(cString: path!))
           try? FileManager.default.startDownloadingUbiquitousItem(at: url)
-          let deadline = Date().addingTimeInterval(60)
-          while Date() < deadline {
-            if FileManager.default.fileExists(atPath: url.path) {
-              return true
-            }
-            Thread.sleep(forTimeInterval: 0.2)
-          }
-          return false
+          return FileManager.default.fileExists(atPath: url.path)
         }, nil)
     }
 

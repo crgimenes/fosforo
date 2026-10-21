@@ -918,6 +918,10 @@
 
     func deleteBackward() {
       live()
+      if !composing.isEmpty {
+        composing.deleteBackward()  // the input method's text, not the host's yet
+        return
+      }
       session.send([0x7F])
     }
 

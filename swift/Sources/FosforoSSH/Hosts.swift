@@ -50,20 +50,19 @@ public struct SSHHosts: Sendable {
 
   public init(_ text: String) {
     for raw in text.split(whereSeparator: \.isNewline) {
-      let line = raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
-      let words = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "=" })
-      guard let key = words.first?.lowercased(), words.count >= 2 else { continue }
+      guard let (word, args) = SSHConfigLine.parse(String(raw)), !args.isEmpty else { continue }
+      let key = word.lowercased()
       switch key {
       case "host":
-        blocks.append(Block(patterns: words.dropFirst().map { $0.lowercased() }))
+        blocks.append(Block(patterns: args.map { $0.lowercased() }))
       case "match":
         blocks.append(Block(patterns: []))
       case "localforward", "remoteforward":
         // [bind:]port host:hostport, two words: as -L and -R spell it, one
-        guard words.count == 3 else { continue }
-        blocks[blocks.count - 1].settings.append((key, words[1] + ":" + words[2]))
+        guard args.count == 2 else { continue }
+        blocks[blocks.count - 1].settings.append((key, args[0] + ":" + args[1]))
       default:
-        blocks[blocks.count - 1].settings.append((key, String(words[1])))
+        blocks[blocks.count - 1].settings.append((key, args[0]))
       }
     }
   }
@@ -156,5 +155,80 @@ public struct SSHHosts: Sendable {
       }
     }
     return any ? e : nil
+  }
+}
+
+/// A line of ssh_config as OpenSSH reads it: the keyword, then its
+/// arguments split on blanks, quotes grouping and a backslash escaping a
+/// quote, a backslash or (outside quotes) a blank; `=` separates the keyword
+/// from the arguments, once; `#` opens a comment only where a word would
+/// start, so `a#b` is a name. Nil for a blank line or a comment.
+enum SSHConfigLine {
+  static func parse(_ line: String) -> (key: String, args: [String])? {
+    let s = Array(line)
+    var i = 0
+    func blank(_ c: Character) -> Bool { c == " " || c == "\t" }
+    while i < s.count && blank(s[i]) {
+      i += 1
+    }
+    guard i < s.count, s[i] != "#" else { return nil }
+    var key = ""
+    while i < s.count && !blank(s[i]) && s[i] != "=" {
+      key.append(s[i])
+      i += 1
+    }
+    while i < s.count && blank(s[i]) {
+      i += 1
+    }
+    if i < s.count && s[i] == "=" {
+      i += 1
+    }
+    var args: [String] = []
+    while true {
+      while i < s.count && blank(s[i]) {
+        i += 1
+      }
+      guard i < s.count, s[i] != "#" else { break }
+      var arg = ""
+      var quote: Character?
+      while i < s.count {
+        let c = s[i]
+        let next: Character? = i + 1 < s.count ? s[i + 1] : nil
+        if c == "\\", let next, "'\"\\".contains(next) || (quote == nil && next == " ") {
+          i += 1
+          arg.append(next)
+        } else if quote == nil, blank(c) {
+          break
+        } else if quote == nil, c == "\"" || c == "'" {
+          quote = c
+        } else if quote == c {
+          quote = nil
+        } else {
+          arg.append(c)
+        }
+        i += 1
+      }
+      args.append(arg)
+    }
+    return (key, args)
+  }
+
+  /// value as one argument of such a line: as it is when it reads back so,
+  /// in double quotes otherwise.
+  static func quoted(_ value: String) -> String {
+    let plain =
+      !value.isEmpty && !value.hasPrefix("#")
+      && !value.contains(where: { " \t\"'\\".contains($0) })
+    if plain {
+      return value
+    }
+    var out = "\""
+    for c in value {
+      if c == "\"" || c == "\\" {
+        out.append("\\")
+      }
+      out.append(c)
+    }
+    return out + "\""
   }
 }

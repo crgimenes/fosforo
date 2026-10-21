@@ -77,10 +77,10 @@ public struct SSHHostsFile: Equatable, Sendable {
         let at = body.firstIndex { SSHHostsFile.keyValue($0)?.0.lowercased() == key.lowercased() }
         switch (at, value.isEmpty) {
         case (let i?, true): body.remove(at: i)
-        case (let i?, false): body[i] = "  \(key) \(value)"
+        case (let i?, false): body[i] = SSHHostsFile.line(key, value)
         case (nil, false):
           let after = body.lastIndex { SSHHostsFile.isManaged($0) } ?? -1
-          body.insert("  \(key) \(value)", at: after + 1)
+          body.insert(SSHHostsFile.line(key, value), at: after + 1)
         case (nil, true): break
         }
       }
@@ -88,7 +88,7 @@ public struct SSHHostsFile: Equatable, Sendable {
     } else {
       var block = ["Host \(h.alias)"]
       for (key, value) in wanted where !value.isEmpty {
-        block.append("  \(key) \(value)")
+        block.append(SSHHostsFile.line(key, value))
       }
       let at = blocks().first { $0.alias == nil && !$0.global }?.start ?? lines.count
       if at > 0, at <= lines.count, !lines[at - 1].trimmingCharacters(in: .whitespaces).isEmpty {
@@ -119,13 +119,13 @@ public struct SSHHostsFile: Equatable, Sendable {
         if let last = lines.last, !last.trimmingCharacters(in: .whitespaces).isEmpty {
           lines.append("")
         }
-        lines += ["Host *", "  IdentityFile \(newValue)"]
+        lines += ["Host *", SSHHostsFile.line("IdentityFile", newValue)]
         return
       }
       switch (identityLine(in: b), newValue.isEmpty) {
       case (let i?, true): lines.remove(at: i)
-      case (let i?, false): lines[i] = "  IdentityFile \(newValue)"
-      case (nil, false): lines.insert("  IdentityFile \(newValue)", at: b.start + 1)
+      case (let i?, false): lines[i] = SSHHostsFile.line("IdentityFile", newValue)
+      case (nil, false): lines.insert(SSHHostsFile.line("IdentityFile", newValue), at: b.start + 1)
       case (nil, true): break
       }
     }
@@ -201,17 +201,15 @@ public struct SSHHostsFile: Equatable, Sendable {
     return managed.contains { $0.lowercased() == key }
   }
 
-  /// Key and value of a line, `Key value` or `Key=value`; nil for blanks
-  /// and comments.
+  /// Key and value of a line as OpenSSH reads them (quotes off, the words
+  /// one blank apart); nil for blanks and comments.
   static func keyValue(_ line: String) -> (String, String)? {
-    let t = line.trimmingCharacters(in: .whitespaces)
-    guard !t.isEmpty, !t.hasPrefix("#") else { return nil }
-    guard let sep = t.firstIndex(where: { $0 == " " || $0 == "\t" || $0 == "=" }) else {
-      return nil
-    }
-    let value = t[t.index(after: sep)...].trimmingCharacters(in: .whitespaces)
-      .trimmingCharacters(in: CharacterSet(charactersIn: "="))
-      .trimmingCharacters(in: .whitespaces)
-    return (String(t[..<sep]), value)
+    guard let (key, args) = SSHConfigLine.parse(line), !args.isEmpty else { return nil }
+    return (key, args.joined(separator: " "))
+  }
+
+  /// The line that reads back as key and value, whatever the value holds.
+  private static func line(_ key: String, _ value: String) -> String {
+    "  \(key) \(SSHConfigLine.quoted(value))"
   }
 }

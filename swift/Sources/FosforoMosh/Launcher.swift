@@ -595,7 +595,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     guard let text = clipboard?(), PrivateKey.isPrivateKey(text) else {
       throw SSHError.io("key paste: the clipboard holds no private key")
     }
-    try makeDirectory(ssh)
+    try makeSSHDirectory()
     try save(Data(text.utf8), to: dest, replace: false)
     let state = PrivateKey.isEncrypted(text) ? "with its passphrase" : "in plain text"
     say("saved \(shown(dest)) (\(state)); `key protect \(name)` keeps it encrypted here\r\n")
@@ -632,7 +632,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     if let blob = try? Data(contentsOf: se) {
       return .secureEnclave(try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: blob))
     }
-    try makeDirectory(deviceDirectory)
+    try makeSSHDirectory()
     if SecureEnclave.isAvailable, let key = try? SecureEnclave.P256.Signing.PrivateKey() {
       try save(key.dataRepresentation, to: se, replace: false)
       return .secureEnclave(key)
@@ -654,17 +654,20 @@ public final class Launcher: Transport, @unchecked Sendable {
       ? "Secure Enclave" : "file"
   }
 
-  /// .ssh as ssh wants it (0700) and, on iOS, out of the device's backups:
-  /// the keys stay on this device.
+  /// A directory as ssh wants .ssh (0700); the backup policy is not its:
+  /// `ssh-keygen -f ~/x` makes the home, and the home is backed up.
   public static func makeDirectory(_ url: URL) throws {
     try FileManager.default.createDirectory(
       at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-    #if os(iOS)
-      var u = url
-      var values = URLResourceValues()
-      values.isExcludedFromBackup = true
-      try u.setResourceValues(values)
-    #endif
+  }
+
+  /// Out of the device's backups: every key file, wherever it is written,
+  /// and ~/.ssh as a whole. The keys stay on this device.
+  public static func keepOffBackup(_ url: URL) throws {
+    var u = url
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try u.setResourceValues(values)
   }
 
   /// A key file, whole or not at all: written under a temporary name already
@@ -710,6 +713,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     }
     guard moved == 0 else { throw failure("rename") }
     done = true
+    try keepOffBackup(url)
   }
 
   /// The most a key file brought in may weigh: keys are a few KB.
@@ -738,6 +742,7 @@ public final class Launcher: Transport, @unchecked Sendable {
       try makeDirectory(dir)
       // ~/.ssh may have been made 0755 by the shell's mkdir
       try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+      try keepOffBackup(dir)
       try store(data, at: dest, replace: replace)
       return
     }
@@ -755,6 +760,11 @@ public final class Launcher: Transport, @unchecked Sendable {
 
   private func makeDirectory(_ url: URL) throws {
     try Launcher.makeDirectory(url)
+  }
+
+  private func makeSSHDirectory() throws {
+    try Launcher.makeDirectory(ssh)
+    try Launcher.keepOffBackup(ssh)
   }
 
   private func save(_ data: Data, to url: URL, replace: Bool) throws {
@@ -1408,7 +1418,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     guard status == 0, PrivateKey.isPrivateKey(key) else {
       throw SSHError.io("key fetch: \(path) on \(t.ssh.host) is not a private key we read")
     }
-    try makeDirectory(ssh)
+    try makeSSHDirectory()
     let dest = ssh.appendingPathComponent(name)
     var pub: Data?
     if parts.count == 2, String(decoding: parts[1], as: UTF8.self).hasPrefix("ssh-") {

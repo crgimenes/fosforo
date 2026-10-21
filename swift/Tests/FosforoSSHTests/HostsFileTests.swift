@@ -116,3 +116,23 @@ private let sample = """
   #expect(g.text == "Host a\n  User u\n\nHost *\n  IdentityFile ~/.ssh/k\n")
   #expect(g.hosts.map(\.alias) == ["a"])
 }
+
+/// A key name the file has to quote or that a reader could cut short (a
+/// blank, a `#`, an `=`, quotes, a backslash) comes back as chosen, from
+/// the editor and from the parser the client reads the file with, as the
+/// default key and as a server's own; no block is added on the way.
+@Test func hostsFileKeepsAwkwardKeyNames() {
+  for name in ["work key", "work#key", "work=key", "wo\"rk", "wo\\rk", "it's", "#x"] {
+    let path = "~/.ssh/" + name
+    var f = SSHHostsFile("Host a\n  User u\n")
+    f.defaultIdentity = path
+    #expect(f.defaultIdentity == path, "\(name)")
+    #expect(SSHHosts(f.text)["a"]?.identityFiles == [path], "\(name)")
+    var h = SSHHostsFile.Host(alias: "a")
+    h.identityFile = path
+    f.save(h)
+    #expect(f.hosts.first?.identityFile == path, "\(name)")
+    #expect(SSHHosts(f.text)["a"]?.identityFiles == [path, path], "\(name)")
+    #expect(f.text.components(separatedBy: "\nHost ").count == 2, "\(name): \(f.text)")
+  }
+}

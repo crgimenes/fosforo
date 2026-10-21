@@ -543,6 +543,26 @@ private final class QuietPort {
   #expect(h["missing"] == nil)
 }
 
+/// As OpenSSH reads a line: quotes group, a backslash escapes, `=` splits
+/// the keyword off once and `#` comments only where a word would start.
+@Test func sshConfigReadsQuotesAndEqualsAsOpenSSH() {
+  let h = SSHHosts(
+    """
+    Host a
+      IdentityFile "~/.ssh/my key"   # mine
+      User=na=me
+      HostName \\"q\\ r
+    Host b
+      IdentityFile ~/.ssh/a#b
+      LocalForward 8080 localhost:80
+    """)
+  #expect(h["a"]?.identityFiles == ["~/.ssh/my key"])
+  #expect(h["a"]?.user == "na=me")
+  #expect(h["a"]?.hostName == "\"q r")
+  #expect(h["b"]?.identityFiles == ["~/.ssh/a#b"])
+  #expect(h["b"]?.localForwards == ["8080:localhost:80"])
+}
+
 @Test func sshConfigIdentityFilesAddUp() {
   let h = SSHHosts(
     """

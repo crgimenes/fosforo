@@ -270,6 +270,53 @@ static bool ph_fetch(void *ctx, const char *path) {
     return true;
 }
 
+static bool ph_fetch_pending(void *ctx, const char *path) {
+    (void)ctx;
+    (void)path;
+    fetches++;
+    return false; /* the download started; the file is not here yet */
+}
+
+/* A placeholder the app cannot bring at once: the command fails now, with
+   the reason once (not once per attempt the shell makes to open it), and
+   each new command asks again; nothing waits under the shared mutex. */
+static void test_placeholder_pending(const char *root) {
+    char marker[512];
+    char real[512];
+    snprintf(marker, sizeof(marker), "%s/.lenta.txt.icloud", root);
+    snprintf(real, sizeof(real), "%s/lenta.txt", root);
+    FILE *f = fopen(marker, "wb");
+    CHECK(f != NULL);
+    fputs("bplist00", f);
+    fclose(f);
+    froc_placeholders(ph_size, ph_fetch_pending, NULL);
+    froc *s = froc_new(root, "teste", "box", NULL, 80, 24);
+    CHECK(s != NULL);
+    take(s);
+    fetches = 0;
+    type(s, "cat lenta.txt\r");
+    const char *o = take(s);
+    const char *word = "lenta.txt: coming from iCloud";
+    const char *said = strstr(o, word);
+    CHECK(fetches == 1 && said != NULL);
+    CHECK(said != NULL && strstr(said + strlen(word), word) == NULL); /* once */
+    CHECK(said != NULL && strstr(o, "cat lenta.txt") < said);         /* after the echo */
+    CHECK(strstr(o, "teste@box") != NULL);                            /* the prompt is back */
+    type(s, "cat lenta.txt\r");
+    take(s);
+    CHECK(fetches == 2); /* a new command asks again */
+    f = fopen(real, "wb");
+    CHECK(f != NULL);
+    fputs("arrived\n", f);
+    fclose(f);
+    type(s, "cat lenta.txt\r");
+    o = take(s);
+    CHECK(fetches == 2 && strstr(o, "arrived") != NULL); /* here now: nothing to ask */
+    froc_free(s);
+    froc_placeholders(NULL, NULL, NULL);
+    CHECK(unlink(marker) == 0 && unlink(real) == 0);
+}
+
 /* A .name.icloud placeholder is listed as name with the size the app
    says, and reading it brings the file to the disk first; without the
    hooks it stays a dot file. */
@@ -814,6 +861,8 @@ static void *type_thread(void *arg) {
     return NULL;
 }
 
+static int start(pthread_t *t, void *(*fn)(void *), void *arg);
+
 /* A Ctrl-C from another thread while a script loops: it stops at once, with
    130, and the session goes on. */
 static void test_interrupt(const char *root) {
@@ -841,7 +890,7 @@ static void test_interrupt(const char *root) {
     froc_busy_output(s, busy_out, NULL);
     typing t = {s, "filo loop.filo; echo after\r"};
     pthread_t th;
-    CHECK(pthread_create(&th, NULL, type_thread, &t) == 0);
+    CHECK(start(&th, type_thread, &t) == 0); /* the script's stack, as the app's */
     struct timespec nap = {0, 300 * 1000 * 1000};
     nanosleep(&nap, NULL);
     CHECK(atomic_load(&busy_bytes) > 0); /* out before the script ended */
@@ -1270,6 +1319,7 @@ int main(void) {
     test_directories_reach_the_disk(root);
     test_clipboard(root);
     test_placeholders(root);
+    test_placeholder_pending(root);
     test_live_files(root);
     test_file_handles(root);
     test_find_on_disk(root);

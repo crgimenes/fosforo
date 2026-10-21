@@ -37,3 +37,27 @@ import Testing
   #expect(c.isEmpty)
   #expect(c.commit() == "")
 }
+
+/// Backspace while composing takes the selection, or the character before
+/// the caret, whole (an emoji, a letter with its accent); at the start it
+/// takes nothing. Emptied, the composition is over: the next Backspace is
+/// the host's.
+@Test func compositionDeletesBackwardByCharacterOrSelection() {
+  var c = Composition()
+  c.mark("a😀e\u{301}", selected: NSRange(location: 5, length: 0))
+  c.deleteBackward()
+  #expect(c.text == "a😀")
+  #expect(c.selection == NSRange(location: 3, length: 0))
+  c.deleteBackward()
+  #expect(c.text == "a")
+  #expect(c.selection == NSRange(location: 1, length: 0))
+  c.mark("abc", selected: NSRange(location: 0, length: 2))
+  c.deleteBackward()
+  #expect(c.text == "c")
+  #expect(c.selection == NSRange(location: 0, length: 0))
+  c.deleteBackward()
+  #expect(c.text == "c")
+  c.select(NSRange(location: 1, length: 0))
+  c.deleteBackward()
+  #expect(c.isEmpty)
+}

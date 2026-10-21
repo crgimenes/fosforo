@@ -832,6 +832,28 @@ private func authorize(_ server: Server, _ keys: [PrivateKey]) throws {
   }
   #expect(made.count == 1)
   #expect(FileManager.default.fileExists(atPath: ssh.appendingPathComponent("device.pub").path))
+  #expect(try ssh.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+}
+
+/// Out of backups: the key file wherever it is written, and ~/.ssh; not a
+/// directory made on the way to a key (`-f ~/x` makes the home), nor its
+/// parents.
+@Test func onlyKeysAndSSHStayOutOfBackups() throws {
+  let dir = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "fosforo-backup-\(UUID().uuidString)")
+  defer { try? FileManager.default.removeItem(at: dir) }
+  func out(_ u: URL) throws -> Bool {
+    try u.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup ?? false
+  }
+  let home = dir.appendingPathComponent("home")
+  try Launcher.makeDirectory(home)
+  let key = home.appendingPathComponent("x")
+  try Launcher.store(Data("k\n".utf8), at: key)
+  #expect(try out(key))
+  #expect(try !out(home))
+  #expect(try !out(dir))
+  let attrs = try FileManager.default.attributesOfItem(atPath: home.path)
+  #expect((attrs[.posixPermissions] as? Int) == 0o700)
 }
 
 /// ssh-keygen -t writes a pair OpenSSH itself reads back (ssh-keygen -y

@@ -596,7 +596,7 @@ public final class Launcher: Transport, @unchecked Sendable {
       throw SSHError.io("key paste: the clipboard holds no private key")
     }
     try makeDirectory(ssh)
-    try save(Data(text.utf8), to: dest)
+    try save(Data(text.utf8), to: dest, replace: false)
     let state = PrivateKey.isEncrypted(text) ? "with its passphrase" : "in plain text"
     say("saved \(shown(dest)) (\(state)); `key protect \(name)` keeps it encrypted here\r\n")
   }
@@ -634,11 +634,11 @@ public final class Launcher: Transport, @unchecked Sendable {
     }
     try makeDirectory(deviceDirectory)
     if SecureEnclave.isAvailable, let key = try? SecureEnclave.P256.Signing.PrivateKey() {
-      try save(key.dataRepresentation, to: se)
+      try save(key.dataRepresentation, to: se, replace: false)
       return .secureEnclave(key)
     }
     let key = Curve25519.Signing.PrivateKey()
-    try save(key.rawRepresentation, to: ed)
+    try save(key.rawRepresentation, to: ed, replace: false)
     return .ed25519(key)
   }
 
@@ -705,7 +705,10 @@ public final class Launcher: Transport, @unchecked Sendable {
         [.protectionKey: FileProtectionType.complete], ofItemAtPath: tmp)
     #endif
     let moved = replace ? rename(tmp, url.path) : renamex_np(tmp, url.path, UInt32(RENAME_EXCL))
-    guard moved == 0 else { throw failure(errno == EEXIST ? "exists:" : "rename") }
+    if moved != 0 && errno == EEXIST {
+      throw SSHError.io("\(url.path) exists; nothing written")
+    }
+    guard moved == 0 else { throw failure("rename") }
     done = true
   }
 
@@ -754,8 +757,22 @@ public final class Launcher: Transport, @unchecked Sendable {
     try Launcher.makeDirectory(url)
   }
 
-  private func save(_ data: Data, to url: URL) throws {
-    try Launcher.store(data, at: url)
+  private func save(_ data: Data, to url: URL, replace: Bool) throws {
+    try Launcher.store(data, at: url, replace: replace)
+  }
+
+  /// A private key and its .pub, neither over a file already there (another
+  /// window may have made the name meanwhile): a .pub that collides takes
+  /// the key this call wrote back out, so no half pair is left.
+  private func savePair(_ key: Data, _ pub: Data?, to url: URL) throws {
+    try save(key, to: url, replace: false)
+    guard let pub else { return }
+    do {
+      try save(pub, to: URL(fileURLWithPath: url.path + ".pub"), replace: false)
+    } catch {
+      unlink(url.path)
+      throw error
+    }
   }
 
   private func answer(_ q: Question, _ text: String) {
@@ -879,8 +896,7 @@ public final class Launcher: Transport, @unchecked Sendable {
       let made = try PrivateKey.generate(
         type: job.type, bits: job.bits, comment: job.comment, passphrase: passphrase)
       try makeDirectory(job.file.deletingLastPathComponent())
-      try save(Data(made.file.utf8), to: job.file)
-      try save(Data(made.pub.utf8), to: URL(fileURLWithPath: job.file.path + ".pub"))
+      try savePair(Data(made.file.utf8), Data(made.pub.utf8), to: job.file)
       say(
         "Your identification has been saved in \(shown(job.file))\r\n"
           + "Your public key has been saved in \(shown(job.file)).pub\r\n"
@@ -1035,7 +1051,7 @@ public final class Launcher: Transport, @unchecked Sendable {
           "encrypted by fosforo for this device's Secure Enclave; it cannot be opened "
           + "elsewhere. In fosforo, key unprotect \(name) writes the original back."
         let sealed = try vault.protect(text, publicKey: line, note: note)
-        try self.save(Data(sealed.utf8), to: url)
+        try self.save(Data(sealed.utf8), to: url, replace: true)
         self.say("protected \(self.shown(url))\r\n")
         if vault.withoutPresence {
           self.say(
@@ -1105,7 +1121,7 @@ public final class Launcher: Transport, @unchecked Sendable {
       Thread.detachNewThread { [self] in
         do {
           let original = try vault.open(text)
-          try self.save(Data(original.utf8), to: url)
+          try self.save(Data(original.utf8), to: url, replace: true)
           self.say("\(self.shown(url)) is in plain text again\r\n")
         } catch {
           self.fail("\(error)")
@@ -1394,12 +1410,12 @@ public final class Launcher: Transport, @unchecked Sendable {
     }
     try makeDirectory(ssh)
     let dest = ssh.appendingPathComponent(name)
-    try save(Data(parts[0]), to: dest)
-    var also = ""
+    var pub: Data?
     if parts.count == 2, String(decoding: parts[1], as: UTF8.self).hasPrefix("ssh-") {
-      try Data(parts[1]).write(to: URL(fileURLWithPath: dest.path + ".pub"), options: .atomic)
-      also = " and its .pub"
+      pub = Data(parts[1])
     }
+    try savePair(Data(parts[0]), pub, to: dest)
+    let also = pub == nil ? "" : " and its .pub"
     let locked = PrivateKey.isEncrypted(key) ? "with its passphrase" : "in plain text, as it was"
     tell(mine, "saved \(shown(dest))\(also) (\(locked))\r\n")
   }

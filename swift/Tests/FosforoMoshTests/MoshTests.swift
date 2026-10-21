@@ -1010,9 +1010,21 @@ private func authorize(_ server: Server, _ keys: [PrivateKey]) throws {
   s.start()
   #expect(waitScreen(s, "test> "))
   let target = "\(NSUserName())@127.0.0.1:\(remote.path)"
-  s.send("key fetch -p \(server.port) \(target) id_ed25519\r")
+  // a .pub of that name made by another window while the fetch was on the
+  // way: nothing written over, and the private key just written taken back
+  s.send("key fetch -p \(server.port) \(target) apressada\r")
   #expect(waitScreen(s, "(yes/no)"))
+  let theirs = dir.appendingPathComponent(".ssh/apressada.pub")
+  try "ssh-ed25519 theirs\n".write(to: theirs, atomically: true, encoding: .utf8)
   s.send("yes\r")
+  #expect(
+    waitScreen(s) {
+      $0.replacingOccurrences(of: "\n", with: "").contains("exists; nothing written")
+    })
+  #expect(try String(contentsOf: theirs, encoding: .utf8) == "ssh-ed25519 theirs\n")
+  #expect(
+    !FileManager.default.fileExists(atPath: dir.appendingPathComponent(".ssh/apressada").path))
+  s.send("key fetch -p \(server.port) \(target) id_ed25519\r")
   #expect(waitScreen(s, "saved ~/.ssh/id_ed25519 and its .pub (in plain text"))
   let copied = dir.appendingPathComponent(".ssh/id_ed25519")
   #expect(
@@ -1394,4 +1406,44 @@ func moshPredictsTypingButNotPasswords() throws {
   try Launcher.bringIn(notKey, to: copy, key: false, replace: false)
   #expect(try String(contentsOf: copy, encoding: .utf8) == "hello")
   #expect(try fm.contentsOfDirectory(atPath: ssh.path) == ["id_test"])  // no temporary left
+}
+
+/// A key another window made while ssh-keygen waited for the passphrase
+/// stays as it is: the pair goes only over nothing, and a .pub that
+/// collides takes the private key just written back out.
+@Test func keygenNeverWritesOverAKeyMadeMeanwhile() throws {
+  let dir = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "keygen-" + UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: dir) }
+  let ssh = try sshDir(dir)
+  let fm = FileManager.default
+  let s = try Session(transport: Typed(testLauncher(dir)), rows: 24, cols: 120, history: 200)
+  s.start()
+  #expect(waitScreen(s, "test> "))
+  func refused() -> Bool {
+    waitScreen(s) {
+      $0.replacingOccurrences(of: "\n", with: "").contains("exists; nothing written")
+    }
+  }
+  s.send("ssh-keygen -t ed25519 -f ~/.ssh/corrida\r")
+  #expect(waitScreen(s, "Enter passphrase"))
+  try "theirs\n".write(to: ssh.appendingPathComponent("corrida"), atomically: true, encoding: .utf8)
+  s.send("\r")
+  #expect(waitScreen(s, "same passphrase again"))
+  s.send("\r")
+  #expect(refused())
+  #expect(
+    try String(contentsOf: ssh.appendingPathComponent("corrida"), encoding: .utf8) == "theirs\n")
+  #expect(try fm.contentsOfDirectory(atPath: ssh.path) == ["corrida"])  // no .pub, no temporary
+
+  s.send("ssh-keygen -t ed25519 -f ~/.ssh/meia\r")
+  #expect(waitScreen(s, "Enter passphrase"))
+  let pub = ssh.appendingPathComponent("meia.pub")
+  try "ssh-ed25519 theirs\n".write(to: pub, atomically: true, encoding: .utf8)
+  s.send("\r")
+  #expect(waitScreen(s, "same passphrase again"))
+  s.send("\r")
+  #expect(refused())
+  #expect(try String(contentsOf: pub, encoding: .utf8) == "ssh-ed25519 theirs\n")
+  #expect(try fm.contentsOfDirectory(atPath: ssh.path).sorted() == ["corrida", "meia.pub"])
 }

@@ -1077,3 +1077,124 @@ func everyPacketMaximumMakesProgress(most: UInt32) {
   #expect(client.lock.try())
   client.lock.unlock()
 }
+
+/// Either end of a tunnel socket closed, the other written: EPIPE, not the
+/// process ended by SIGPIPE (nothing in the app ignores it).
+@Test func aTunnelSocketPeerClosingIsAnErrorNotASignal() throws {
+  let (client, ch, peer) = wiredChannel()
+  defer { close(peer) }
+  // the channel's end, written after its holder closed the other: holding
+  // the lock keeps the pump from closing the channel's end first
+  let fd = try ch.socket()
+  client.lock.lock()
+  close(fd)
+  ch.onData?([1, 2, 3])
+  client.lock.unlock()
+  // the holder's end, written once the channel ended and its pump closed
+  // the channel's end
+  let other = SSHChannel(client: client, id: 1)
+  client.channels[1] = other
+  let fd2 = try other.socket()
+  defer { close(fd2) }
+  other.finish(status: 0, error: nil)
+  func brokenPipe() -> Bool {
+    var byte: UInt8 = 1
+    return Darwin.write(fd2, &byte, 1) < 0 && errno == EPIPE
+  }
+  #expect(Collector().wait(until: brokenPipe, seconds: 5))
+}
+
+/// Everything a channel heard, in the order the callbacks saw it.
+private final class Heard: @unchecked Sendable {
+  private let lock = NSLock()
+  private var events: [String] = []
+
+  func listen(_ ch: SSHChannel, holdingData: String? = nil, held: DispatchSemaphore? = nil) {
+    ch.onData = { data in
+      self.note(String(decoding: data, as: UTF8.self))
+      if String(decoding: data, as: UTF8.self) == holdingData, let held {
+        held.wait()
+      }
+    }
+    ch.onEOF = { self.note("eof") }
+    ch.onClose = { status, error in
+      self.note("close \(status.map(String.init) ?? "-") \(error?.description ?? "-")")
+    }
+  }
+
+  func note(_ s: String) {
+    lock.lock()
+    events.append(s)
+    lock.unlock()
+  }
+
+  var all: [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return events
+  }
+
+  func wait(for n: Int) -> Bool {
+    Collector().wait(until: { self.all.count >= n }, seconds: 5)
+  }
+}
+
+/// A and B queued before start(), C arriving while A is being delivered:
+/// still ABC.
+@Test func dataArrivingDuringStartKeepsItsOrder() throws {
+  let (client, ch, peer) = wiredChannel()
+  defer { close(peer) }
+  let heard = Heard()
+  let onA = DispatchSemaphore(value: 0)
+  heard.listen(ch, holdingData: "A", held: onA)
+  try ch.received(Array("A".utf8))
+  try ch.received(Array("B".utf8))
+  Thread.detachNewThread { ch.start() }
+  #expect(heard.wait(for: 1))  // start() is delivering A, outside the lock
+  try ch.received(Array("C".utf8))
+  onA.signal()
+  #expect(heard.wait(for: 3))
+  #expect(heard.all == ["A", "B", "C"])
+  withExtendedLifetime(client) {}
+}
+
+/// A command over before anyone listens (its data, exit status, EOF and
+/// close all read before start()) is still heard whole, in order, once.
+@Test func anEarlyEndIsHeardAfterStart() throws {
+  let (client, ch, peer) = wiredChannel()
+  defer { close(peer) }
+  try ch.received(Array("done".utf8))
+  var status = SSHWriter(message: Msg.channelRequest)
+  status.u32(0)
+  status.string("exit-status")
+  status.bool(false)
+  status.u32(7)
+  try client.handle(status.bytes)
+  var eof = SSHWriter(message: Msg.channelEOF)
+  eof.u32(0)
+  try client.handle(eof.bytes)
+  var close = SSHWriter(message: Msg.channelClose)
+  close.u32(0)
+  try client.handle(close.bytes)
+  let heard = Heard()
+  heard.listen(ch)
+  #expect(heard.all.isEmpty)
+  ch.start()
+  ch.start()
+  #expect(heard.all == ["done", "eof", "close 7 -"])
+  withExtendedLifetime(client) {}
+}
+
+/// A connection that broke before start() still tells onClose why, once.
+@Test func anEarlyFailureIsHeardAfterStart() throws {
+  let (client, ch, peer) = wiredChannel()
+  defer { close(peer) }
+  ch.finish(status: nil, error: .disconnected("gone"))
+  ch.finish(status: nil, error: .disconnected("again"))
+  #expect(throws: SSHError.disconnected("gone")) { try ch.await(1) }
+  let heard = Heard()
+  heard.listen(ch)
+  ch.start()
+  #expect(heard.all == ["close - ssh: disconnected: gone"])
+  withExtendedLifetime(client) {}
+}

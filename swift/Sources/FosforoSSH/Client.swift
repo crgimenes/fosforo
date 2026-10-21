@@ -1082,7 +1082,7 @@ public final class SSHClient: @unchecked Sendable {
       lock.unlock()
     case Msg.channelEOF:
       let id = try r.u32()
-      channel(id)?.onEOF?()
+      channel(id)?.eof()
     case Msg.channelClose:
       let id = try r.u32()
       lock.lock()
@@ -1206,7 +1206,8 @@ public final class SSHChannel: @unchecked Sendable {
   private var finished = false
   var exitStatus: Int32?
   private var started = false
-  private var queued: [[UInt8]] = []
+  private var draining = false
+  private var queued: [Event] = []
   var asking = ""  // what the next CHANNEL_SUCCESS/FAILURE answers
   var answer: Result<Void, SSHError>?
   let gate = DispatchSemaphore(value: 0)
@@ -1218,6 +1219,15 @@ public final class SSHChannel: @unchecked Sendable {
   public var onClose: (@Sendable (Int32?, SSHError?) -> Void)?
   /// The server's EOF: nothing more will come (a tunnel's far end hung up).
   public var onEOF: (@Sendable () -> Void)?
+
+  /// What the server sent before start(): held, in order, for the callbacks
+  /// set by then (an EOF or close kept here is one a short command sent
+  /// before the caller could listen).
+  private enum Event {
+    case data([UInt8])
+    case eof
+    case close(Int32?, SSHError?)
+  }
 
   init(client: SSHClient, id: UInt32) {
     self.client = client
@@ -1239,15 +1249,47 @@ public final class SSHChannel: @unchecked Sendable {
   }
 
   /// Delivers what the server sends from now on; what came before start()
-  /// is delivered first, in order.
+  /// is delivered first, in order: what arrives while that is under way
+  /// joins the queue, so nothing overtakes it.
   public func start() {
     client.lock.lock()
     started = true
-    let q = queued
-    queued.removeAll()
+    if draining || queued.isEmpty {
+      client.lock.unlock()
+      return
+    }
+    draining = true
+    while true {
+      let q = queued
+      queued.removeAll()
+      client.lock.unlock()
+      for e in q {
+        deliver(e)
+      }
+      client.lock.lock()
+      if queued.isEmpty {
+        break
+      }
+    }
+    draining = false
     client.lock.unlock()
-    for data in q {
+  }
+
+  /// Under the lock: true when e was queued for start() to deliver.
+  private func heldLocked(_ e: Event) -> Bool {
+    guard !started || draining else { return false }
+    queued.append(e)
+    return true
+  }
+
+  private func deliver(_ e: Event) {
+    switch e {
+    case .data(let data):
       onData?(data)
+    case .eof:
+      onEOF?()
+    case .close(let status, let error):
+      onClose?(status, error)
     }
   }
 
@@ -1256,10 +1298,7 @@ public final class SSHChannel: @unchecked Sendable {
     do {
       client.lock.lock()
       defer { client.lock.unlock() }
-      deliver = started
-      if !deliver && !data.isEmpty {
-        queued.append(data)
-      }
+      deliver = !data.isEmpty && !heldLocked(.data(data))
       localWindow -= min(localWindow, UInt32(data.count))
       if localWindow < SSHClient.window / 2 {
         var w = SSHWriter(message: Msg.channelWindowAdjust)
@@ -1274,21 +1313,34 @@ public final class SSHChannel: @unchecked Sendable {
     }
   }
 
+  func eof() {
+    client.lock.lock()
+    let held = heldLocked(.eof)
+    client.lock.unlock()
+    if !held {
+      onEOF?()
+    }
+  }
+
   /// Once: the close, with its status or the connection's failure; a
   /// pending await is answered with the failure too.
   func finish(status: Int32?, error: SSHError?) {
+    let why = status == nil ? error : nil
     client.lock.lock()
     let first = !finished
     finished = true
     if first, let error {
       answer = .failure(error)
     }
+    let held = first && heldLocked(.close(status, why))
     client.lock.unlock()
     guard first else { return }
     if error != nil {
       gate.signal()
     }
-    onClose?(status, status == nil ? error : nil)
+    if !held {
+      onClose?(status, why)
+    }
   }
 
   public func send(_ bytes: [UInt8]) {
@@ -1348,6 +1400,14 @@ public final class SSHChannel: @unchecked Sendable {
     var pair: [Int32] = [0, 0]
     guard socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0 else {
       throw SSHError.io("socketpair: \(String(cString: strerror(errno)))")
+    }
+    var one: Int32 = 1
+    for fd in pair
+    where setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size)) != 0 {
+      let why = String(cString: strerror(errno))
+      Darwin.close(pair[0])
+      Darwin.close(pair[1])
+      throw SSHError.io("socketpair: SO_NOSIGPIPE: \(why)")
     }
     bridge(pair[0], halfClose: false)
     return pair[1]

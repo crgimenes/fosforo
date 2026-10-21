@@ -519,7 +519,11 @@
     @objc func newSession() {
       // where the session in front is: its rocchetto's directory, under any ssh
       let front = views.indices.contains(current) ? views[current] : nil
-      try? add(directory: (front?.session.transport as? ShellSwitch)?.directory)
+      do {
+        try add(directory: (front?.session.transport as? ShellSwitch)?.directory)
+      } catch {
+        complain("New session", error)
+      }
     }
 
     /// A window with no terminal has nothing to show: the last session is

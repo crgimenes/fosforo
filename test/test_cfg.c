@@ -96,6 +96,36 @@ static void test_hooks(cfg_var *v, char *err) {
     cfg_close(NULL);
 }
 
+/* A handler that keeps the event's text in a setting, fired 20000 times
+   with 255 bytes each: the Filo arena (1 MB) takes back what every run
+   left behind, so the hook stays usable. */
+static void test_hook_values_do_not_fill_the_arena(cfg_var *v, char *err) {
+    defaults(v);
+    const char *src = "(set on-title (fn (a) (set FontName a)))";
+    cfg_session *s = cfg_open((const uint8_t *)src, strlen(src), themes, v, 3, err, 256);
+    CHECK(s != NULL);
+    if (s == NULL) {
+        return;
+    }
+    char arg[256];
+    char note[256];
+    int fired = 0;
+    for (int i = 0; i < 20000; i++) {
+        memset(arg, i % 2 == 0 ? 'a' : 'b', 255);
+        arg[255] = '\0';
+        if (cfg_fire(s, "title", arg, v, 3, note, sizeof(note), err, 256) != 0) {
+            break;
+        }
+        fired++;
+    }
+    CHECK(fired == 20000);
+    if (fired < 20000) {
+        fprintf(stderr, "event %d: %s\n", fired, err);
+    }
+    CHECK(strcmp(v[2].str, arg) == 0);
+    cfg_close(s);
+}
+
 int main(void) {
     cfg_var v[3];
     char err[256] = "";
@@ -132,6 +162,7 @@ int main(void) {
 
     test_themes(v, err);
     test_hooks(v, err);
+    test_hook_values_do_not_fill_the_arena(v, err);
     char path[512];
     snprintf(path, sizeof(path), "%s/big.filo", dir);
     unlink(path);

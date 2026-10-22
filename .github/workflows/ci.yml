@@ -156,8 +156,9 @@ jobs:
       - run: make -C fosforo fmt-check tidy check LLVM="$(brew --prefix llvm)/bin"
 
   # The iOS app: the UIKit code (#if os(iOS)) the Mac build never compiles,
-  # for the simulator and, Release with every warning an error, for devices.
-  # Nothing is signed for distribution and nothing runs.
+  # for the simulator and, Release with every warning an error, for devices;
+  # the simulator build runs once, headless (tools/ios-smoke.sh). Nothing is
+  # signed for distribution.
   ios:
     runs-on: macos-26
     timeout-minutes: 40
@@ -191,6 +192,9 @@ jobs:
           ref: 55b5f7be96580fdbc13b8f0a72d14a4bef944eb1
           path: edt
       - run: make -C fosforo ios-sim
+      # the debug build launched in a throwaway simulator, no window:
+      # typed into its shell, and Settings opened over it
+      - run: fosforo/tools/ios-smoke.sh
       - run: >
           cd fosforo/swift && xcodebuild -scheme fosforo-ios -destination 'generic/platform=iOS'
           -configuration Release -derivedDataPath ../build/dd-ios-rel CODE_SIGNING_ALLOWED=NO

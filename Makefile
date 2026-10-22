@@ -24,7 +24,7 @@ LIB_OBJ = $(patsubst %.c,build/obj/%.o,$(notdir $(C_SRC)))
 # must match platforms in swift/Package.swift
 LIB_FLAGS = -O2 $(FLAGS) -mmacosx-version-min=14.0
 
-.PHONY: release ios-sim ios-device ios-store xcframework roc-host all lib test bench fuzz cov fmt fmt-check tidy check qa clean swift-fmt swift-build swift-test app install
+.PHONY: release ios-sim ios-smoke ios-device ios-store xcframework roc-host all lib test bench fuzz cov fmt fmt-check tidy check qa clean swift-fmt swift-build swift-test app install
 
 all: build/vtdump lib roc-host
 
@@ -206,6 +206,11 @@ ios-sim: xcframework icons
 	codesign --force --sign - build/fosforo-sim.app
 
 # installs on the paired iPhone/iPad; DEVICE=name picks one (tools/ios-device.sh -h)
+# The simulator build launched where no one sees it, driven through its
+# first session and Settings: tools/ios-smoke.sh.
+ios-smoke: ios-sim
+	tools/ios-smoke.sh
+
 ios-device: xcframework icons
 	FONT_3270="$(FONT_3270)" tools/ios-device.sh
 

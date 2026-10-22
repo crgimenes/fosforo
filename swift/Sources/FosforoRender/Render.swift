@@ -238,10 +238,59 @@ public final class Renderer {
 
   /// Grid that fits in a pixel area.
   public func gridSize(width: Int, height: Int) -> (rows: Int, cols: Int) {
+    Renderer.gridSize(
+      width: width, height: height, cellWidth: metrics.width, cellHeight: metrics.height,
+      statusBar: statusBar)
+  }
+
+  public static func gridSize(
+    width: Int, height: Int, cellWidth: Int, cellHeight: Int, statusBar: Bool
+  ) -> (rows: Int, cols: Int) {
     (
-      max(1, height / metrics.height - (statusBar ? 1 : 0)),
-      max(1, width / metrics.width)
+      max(1, height / cellHeight - (statusBar ? 1 : 0)),
+      max(1, width / cellWidth)
     )
+  }
+
+  /// The iOS grid, in pixels, between the top margin and `bottom`. The
+  /// system's margins are wider than what lies in them (iPadOS 26: 32 points
+  /// over a status bar of fewer): a row short by less than half a row is made
+  /// whole from them, half each at most, never from below a firm bottom (the
+  /// keyboard, the Pencil's bar); worked out from the margins and the row,
+  /// not per device. On a firm bottom the grid sits on it and what is left of
+  /// a row goes to the top, where it does not show.
+  public static func fitGrid(
+    width: Int, top: Int, bottom: Int, left: Int, bottomMargin: Int, firm: Bool,
+    cellWidth: Int, cellHeight: Int, statusBar: Bool
+  ) -> (rows: Int, cols: Int, inset: SIMD2<Int>) {
+    let barRows = statusBar ? 1 : 0
+    var topPx = top
+    var usableH = bottom - top
+    let fit = gridSize(
+      width: width, height: max(usableH, cellHeight), cellWidth: cellWidth,
+      cellHeight: cellHeight, statusBar: statusBar)
+    let short = cellHeight - (usableH - (fit.rows + barRows) * cellHeight)
+    if short * 2 < cellHeight {
+      let upMax = topPx / 2
+      let downMax = firm ? 0 : bottomMargin / 2
+      var down = min(downMax, short / 2)
+      var up = short - down
+      if up > upMax {
+        up = upMax
+        down = short - up
+      }
+      if down <= downMax {
+        topPx -= up
+        usableH += short
+      }
+    }
+    let (rows, cols) = gridSize(
+      width: width, height: max(usableH, cellHeight), cellWidth: cellWidth,
+      cellHeight: cellHeight, statusBar: statusBar)
+    if firm {
+      topPx = bottom - (rows + barRows) * cellHeight
+    }
+    return (rows, cols, SIMD2(left, topPx))
   }
 
   private func color(_ c: UInt32, _ colors: [UInt32], fallback: Int) -> UInt32 {

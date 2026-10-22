@@ -23,6 +23,34 @@ public struct Screen: Sendable {
     cells[row * cols + col]
   }
 
+  /// The grid as text, a line per row, trailing blanks dropped: what a check
+  /// that reads the screen compares (tests, the simulator smoke).
+  public var text: String {
+    guard rows > 0, cols > 0 else { return "" }
+    var lines: [String] = []
+    for r in 0..<rows {
+      var line = String.UnicodeScalarView()
+      for c in 0..<cols {
+        let cell = cells[r * cols + c]
+        if UInt32(cell.flags) & UInt32(VT_CELL_WIDE_TAIL) != 0 {
+          continue  // the wide glyph before it is the whole of it
+        }
+        let cp = cell.cp
+        if cp == 0 {
+          line.append(" ")
+        } else if let s = Unicode.Scalar(cp) {
+          line.append(s)
+        }
+      }
+      var text = String(line)
+      while text.hasSuffix(" ") {
+        text.removeLast()
+      }
+      lines.append(text)
+    }
+    return lines.joined(separator: "\n")
+  }
+
   /// Text the input method is still composing, underlined at the cursor,
   /// which moves to its end; none of it reaches the host until committed.
   /// yagni: what does not fit on the cursor's row is cut, not wrapped.

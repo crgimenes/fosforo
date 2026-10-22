@@ -795,41 +795,15 @@
       canvas.layer.position = .zero
       canvas.bounds = bounds
       zoomed()
-      // the system's margins are wider than what lies in them (iPadOS 26:
-      // 32 points over a status bar of fewer): a row short by less than half
-      // a row is made whole from them, half each at most, never from the
-      // keyboard; worked out from the margins and the row, not per device
-      let rowPx = renderer.metrics.height
-      let barRows = renderer.statusBar ? 1 : 0
-      let width = max(Int((bounds.width - safe.left - safe.right) * scale), renderer.metrics.width)
-      var topPx = Int(safe.top * scale)
-      var usableH = Int(bottom * scale) - topPx
-      let fit = renderer.gridSize(width: width, height: max(usableH, rowPx))
-      let short = rowPx - (usableH - (fit.rows + barRows) * rowPx)
-      if short * 2 < rowPx {
-        let upMax = topPx / 2
-        let downMax = firm ? 0 : Int(safe.bottom * scale) / 2
-        var down = min(downMax, short / 2)
-        var up = short - down
-        if up > upMax {
-          up = upMax
-          down = short - up
-        }
-        if down <= downMax {
-          topPx -= up
-          usableH += short
-        }
-      }
-      let (rows, cols) = renderer.gridSize(width: width, height: max(usableH, rowPx))
-      if firm {
-        // on the keyboard (or the Pencil's bar) the grid sits on it, and
-        // what is left of a row goes to the top, where it does not show
-        topPx = Int(bottom * scale) - (rows + barRows) * rowPx
-      }
-      renderer.inset = SIMD2(Int(safe.left * scale), topPx)
-      if rows != asked.rows || cols != asked.cols {
-        asked = (rows, cols)
-        session.resize(rows: rows, cols: cols)
+      let fit = Renderer.fitGrid(
+        width: max(Int((bounds.width - safe.left - safe.right) * scale), renderer.metrics.width),
+        top: Int(safe.top * scale), bottom: Int(bottom * scale), left: Int(safe.left * scale),
+        bottomMargin: Int(safe.bottom * scale), firm: firm, cellWidth: renderer.metrics.width,
+        cellHeight: renderer.metrics.height, statusBar: renderer.statusBar)
+      renderer.inset = fit.inset
+      if fit.rows != asked.rows || fit.cols != asked.cols {
+        asked = (fit.rows, fit.cols)
+        session.resize(rows: fit.rows, cols: fit.cols)
       }
       dirty = true
     }

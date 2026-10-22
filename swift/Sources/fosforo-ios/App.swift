@@ -248,6 +248,9 @@
       window.makeKeyAndVisible()
       self.window = window
       Importer.offer(connectionOptions.urlContexts.map(\.url), from: terminals)
+      #if DEBUG
+        if let terminals { Smoke.start(terminals) }
+      #endif
     }
 
     /// Killed in the background, the window comes back where its front
@@ -410,6 +413,7 @@
     private var theme: Theme
     private var views: [TerminalView] = []
     private var current = 0
+    private var order: SessionOrder { SessionOrder(count: views.count, current: current) }
 
     /// directory: where the first session opens; the home when nil or gone.
     init(theme: Theme, directory: String? = nil) {
@@ -425,6 +429,10 @@
     var frontDirectory: String? {
       guard views.indices.contains(current) else { return nil }
       return (views[current].session.transport as? ShellSwitch)?.directory
+    }
+
+    var frontSession: Session? {
+      views.indices.contains(current) ? views[current].session : nil
     }
 
     @available(*, unavailable)
@@ -479,13 +487,13 @@
         self.ended(v)
       }
       v.onSwipe = { [weak self] next in
-        guard let self, !self.views.isEmpty else { return }
-        self.show((self.current + (next ? 1 : self.views.count - 1)) % self.views.count)
+        guard let self else { return }
+        self.show(next ? self.order.next : self.order.previous)
       }
       v.frame = view.bounds
       v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
       view.addSubview(v)
-      views.insert(v, at: views.isEmpty ? 0 : current + 1)
+      views.insert(v, at: order.insertion)
       if isViewLoaded && view.window != nil {
         v.layoutIfNeeded()  // the grid's real size before the shell asks (the banner fits or not)
         v.start()
@@ -501,8 +509,8 @@
       return true
     }
 
-    private func show(_ index: Int) {
-      guard views.indices.contains(index) else { return }
+    private func show(_ index: Int?) {
+      guard let index, views.indices.contains(index) else { return }
       if active && current != index {
         focus(false)
       }
@@ -574,7 +582,7 @@
       v.stop()
       v.removeFromSuperview()
       Hooks.fire("close")
-      show(min(i < current ? current - 1 : current, views.count - 1))
+      show(order.afterRemoving(i))
     }
 
     /// The scene is gone: every session ends.
@@ -661,17 +669,15 @@
     }
 
     @objc func previousSession() {
-      guard !views.isEmpty else { return }
-      show((current + views.count - 1) % views.count)
+      show(order.previous)
     }
 
     @objc func nextSession() {
-      guard !views.isEmpty else { return }
-      show((current + 1) % views.count)
+      show(order.next)
     }
 
     @objc func selectSession(_ c: UICommand) {
-      show(((c.propertyList as? Int) ?? 1) - 1)
+      show(order.select((c.propertyList as? Int) ?? 1))
     }
 
     /// On the iPad the window controls (close, resize) live in that bar.

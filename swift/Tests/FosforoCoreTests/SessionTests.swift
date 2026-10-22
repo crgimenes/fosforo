@@ -18,18 +18,7 @@ private func eventually(_ condition: () -> Bool) -> Bool {
 }
 
 private func text(_ screen: Screen, row: Int) -> String {
-  var s = ""
-  for c in 0..<screen.cols {
-    let cell = screen.cell(row, c)
-    if cell.flags & UInt8(VT_CELL_WIDE_TAIL) != 0 {
-      continue
-    }
-    s.unicodeScalars.append(Unicode.Scalar(cell.cp == 0 ? 32 : cell.cp) ?? " ")
-  }
-  while s.hasSuffix(" ") {
-    s.removeLast()
-  }
-  return s
+  String(screen.text.split(separator: "\n", omittingEmptySubsequences: false)[row])
 }
 
 private func shell(_ script: String, rows: Int = 5, cols: Int = 30) throws -> Session {

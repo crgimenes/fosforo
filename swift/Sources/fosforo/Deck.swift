@@ -12,6 +12,7 @@
     private unowned let app: AppDelegate
     private(set) var views: [TerminalView] = []
     private var current = 0
+    private var order: SessionOrder { SessionOrder(count: views.count, current: current) }
     var onEmpty: (() -> Void)?
     static let frameName = "fosforo"
 
@@ -82,8 +83,8 @@
         self.remove(view)
       }
       view.onSwipe = { [weak self] next in
-        guard let self, !self.views.isEmpty else { return }
-        self.show((self.current + (next ? 1 : self.views.count - 1)) % self.views.count)
+        guard let self else { return }
+        self.show(next ? self.order.next : self.order.previous)
       }
       view.onTitle = { [weak self, weak view] t in
         guard let self, let view, self.views.indices.contains(self.current),
@@ -93,7 +94,7 @@
         }
         self.window.title = t.isEmpty ? "fosforo" : t
       }
-      views.insert(view, at: views.isEmpty ? 0 : current + 1)
+      views.insert(view, at: order.insertion)
       view.start()
       Hooks.fire("open")
       show(views.firstIndex { $0 === view } ?? 0)
@@ -106,8 +107,8 @@
       }
     }
 
-    private func show(_ index: Int) {
-      guard views.indices.contains(index) else { return }
+    private func show(_ index: Int?) {
+      guard let index, views.indices.contains(index) else { return }
       if window.isKeyWindow && current != index && views.indices.contains(current) {
         views[current].session.focus(false)
       }
@@ -149,7 +150,7 @@
         window.close()
         return
       }
-      show(min(i, views.count - 1))
+      show(order.afterRemoving(i))
     }
 
     // MARK: - menu actions (responder chain)
@@ -197,15 +198,15 @@
     }
 
     @objc func previousSession(_ sender: Any?) {
-      show((current + views.count - 1) % views.count)
+      show(order.previous)
     }
 
     @objc func nextSession(_ sender: Any?) {
-      show((current + 1) % views.count)
+      show(order.next)
     }
 
     @objc func selectSession(_ sender: NSMenuItem) {
-      show(sender.tag - 1)
+      show(order.select(sender.tag))
     }
 
     func windowWillClose(_ note: Notification) {

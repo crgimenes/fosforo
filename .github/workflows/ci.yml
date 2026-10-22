@@ -96,6 +96,11 @@ jobs:
           path: fosforo
       - uses: actions/checkout@v7
         with:
+          repository: crgimenes/clang_filo
+          ref: c04d0149710f2ce45cae4dc60e0220a7cbab7067
+          path: clang_filo
+      - uses: actions/checkout@v7
+        with:
           repository: crgimenes/filo-term
           ref: 15d29669eeabd7ef0060c4f695c65b08baed8ce8
           path: filo-term

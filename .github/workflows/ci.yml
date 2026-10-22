@@ -84,6 +84,34 @@ jobs:
       - run: brew install mosh
       - run: make -C fosforo swift-fmt swift-build swift-test
 
+  # Any byte stream is terminal output and none may fault: libFuzzer on
+  # vt_write, with Homebrew's clang (Apple's ships no libFuzzer). Short by
+  # design: a regression smoke, not the campaign.
+  fuzz:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: fosforo
+      - uses: actions/checkout@v7
+        with:
+          repository: crgimenes/filo-term
+          ref: 15d29669eeabd7ef0060c4f695c65b08baed8ce8
+          path: filo-term
+      - run: brew install llvm
+      - run: make -C fosforo fuzz LLVM="$(brew --prefix llvm)/bin" FUZZ_SECONDS=60
+      - name: Upload findings
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: |
+            fosforo/crash-*
+            fosforo/timeout-*
+            fosforo/leak-*
+          if-no-files-found: ignore
+
   # The C lint, with LLVM's own tools, on the headers it is written for: the
   # pty is a Mac's (openpty from util.h). The rocchetto host is linted with
   # rocchetto's flags, so its library is built first.

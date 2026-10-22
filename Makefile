@@ -24,7 +24,7 @@ LIB_OBJ = $(patsubst %.c,build/obj/%.o,$(notdir $(C_SRC)))
 # must match platforms in swift/Package.swift
 LIB_FLAGS = -O2 $(FLAGS) -mmacosx-version-min=14.0
 
-.PHONY: release ios-sim ios-device ios-store xcframework roc-host all lib test bench fuzz fmt fmt-check tidy check qa clean swift-fmt swift-build swift-test app install
+.PHONY: release ios-sim ios-device ios-store xcframework roc-host all lib test bench fuzz cov fmt fmt-check tidy check qa clean swift-fmt swift-build swift-test app install
 
 all: build/vtdump lib roc-host
 
@@ -32,15 +32,21 @@ all: build/vtdump lib roc-host
 # rocchetto: it is only a terminal). libroc.a brings its own Filo and filo-term,
 # which must not meet the app's copies in one binary. The flags come from
 # rocchetto itself (they shape struct roc).
+# The test links the shell's sources compiled under the sanitizers, not
+# libroc.a: an invalid access inside the shell has to fail the gate too.
 roc-host:
 	$(MAKE) -C $(ROC) lib $(ROC_APPS)
 	@mkdir -p build
 	$(CC) -O2 $(WARN) $$(cat $(ROC)/build/libroc.cflags) -o build/fosforo-roc rochost/main.c rochost/host.c \
 		$(ROC)/build/libroc.a
+	@rm -rf build/roc-san && mkdir -p build/roc-san
+	for s in $$($(MAKE) -s -C $(ROC) lib-sources $(ROC_APPS)); do \
+		$(CC) $(SAN) $$(cat $(ROC)/build/libroc.cflags) -c -o build/roc-san/$$(basename $$s .c).o $$s || exit 1; \
+	done
 	$(CC) $(SAN) $(WARN) -Irochost $$(cat $(ROC)/build/libroc.cflags) \
 		-DROC_FIXTURES='"$(abspath $(ROC))/test/fixtures/utilities.txt"' \
 		-DROC_COMMANDS='"$(abspath $(ROC))/commands/bin"' -o build/test_rochost \
-		test/test_rochost.c rochost/host.c $(ROC)/build/libroc.a
+		test/test_rochost.c rochost/host.c build/roc-san/*.o
 	./build/test_rochost
 
 # The C core for the Swift package, macOS + iOS + simulator slices. It only
@@ -101,6 +107,10 @@ bench: bench/bench_vt.c $(VT_SRC) $(HDRS)
 	@mkdir -p build
 	$(CC) -O2 $(FLAGS) -o build/bench_vt bench/bench_vt.c $(VT_SRC)
 	./build/bench_vt
+
+# Line coverage of the tests the gate runs: build/cov/{c,swift}.txt per file.
+cov:
+	SAN="$(SAN)" FLAGS="$(FLAGS)" VT_SRC="$(VT_SRC)" FILO_SRC="$(FILO_SRC)" ROC="$(ROC)" CC="$(CC)" tools/cov.sh $(COV)
 
 fuzz: fuzz/fuzz_vt.c $(VT_SRC) $(HDRS)
 	@mkdir -p build

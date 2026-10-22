@@ -81,11 +81,12 @@ final class Atlas {
 
   private static let facesLock = NSLock()
   nonisolated(unsafe) private static var facesCache: [String: [CTFont]] = [:]
-  /// How many distinct fonts went to CoreText so far (tests).
-  static var facesMade: Int {
+  /// How many face sets a font size has cost CoreText, any scale (tests:
+  /// a count of every font would move under the other tests running beside).
+  static func facesMade(size: Double) -> Int {
     facesLock.lock()
     defer { facesLock.unlock() }
-    return facesCache.count
+    return facesCache.keys.filter { $0.contains("|\(size)|") }.count
   }
 
   /// The regular, bold, italic and bold italic faces of a font at a scale,

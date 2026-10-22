@@ -496,16 +496,17 @@ func nerdFontIconsComeFromTheSymbolsFont() throws {
 }
 
 /// The faces of a font at a size go to CoreText once per process: a second
-/// renderer with the same theme makes none.
+/// renderer with the same theme makes none. The size is this test's alone,
+/// so renderers the other tests make beside it do not count.
 @Test func fontFacesAreMadeOnce() throws {
   var theme = Theme()
-  theme.fontSize = 13.5
+  theme.fontSize = 13.37
   _ = try Renderer(theme: theme, scale: 2)
-  let made = Atlas.facesMade
+  #expect(Atlas.facesMade(size: 13.37) == 1)
   _ = try Renderer(theme: theme, scale: 2)
-  #expect(Atlas.facesMade == made)
+  #expect(Atlas.facesMade(size: 13.37) == 1)
   _ = try Renderer(theme: theme, scale: 3)  // another scale is another set
-  #expect(Atlas.facesMade == made + 1)
+  #expect(Atlas.facesMade(size: 13.37) == 2)
 }
 
 @Test func fontSizeChangesTheCells() throws {

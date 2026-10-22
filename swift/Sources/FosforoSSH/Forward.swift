@@ -117,7 +117,10 @@ private func readExact(_ fd: Int32, _ n: Int) throws -> [UInt8] {
   var got = 0
   while got < n {
     let r = out[got...].withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
-    guard r > 0 else { throw SSHError.io("socks: the client went away") }
+    guard r > 0 else {
+      throw SSHError.io(
+        r < 0 && errno == EWOULDBLOCK ? "socks: no request in time" : "socks: the client went away")
+    }
     got += r
   }
   return out
@@ -140,7 +143,17 @@ private func writeAll(_ fd: Int32, _ bytes: [UInt8]) {
   _ = bytes.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
 }
 
-func socksRequest(_ fd: Int32) throws -> SocksRequest {
+/// The handshake is given `timeout` seconds: a client that connects and
+/// says nothing would hold its thread for good. The socket is blocking
+/// again on return, as the bridge reads it.
+func socksRequest(_ fd: Int32, timeout: TimeInterval) throws -> SocksRequest {
+  func receiveTimeout(_ seconds: TimeInterval) {
+    var tv = timeval(
+      tv_sec: Int(seconds), tv_usec: Int32(seconds.truncatingRemainder(dividingBy: 1) * 1e6))
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+  }
+  receiveTimeout(timeout)
+  defer { receiveTimeout(0) }
   let version = try readExact(fd, 1)[0]
   if version == 4 {
     let head = try readExact(fd, 7)  // command, port, IPv4

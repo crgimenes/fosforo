@@ -634,8 +634,7 @@ private func rsaVerify(n: [UInt8], e: [UInt8], sha512: Bool, signature: [UInt8],
 }
 
 /// Host keys seen before, in OpenSSH's known_hosts format ("[host]:port
-/// type base64" for non-22 ports). Hashed lines are skipped, not matched:
-/// this file is fosforo's own.
+/// type base64" for non-22 ports); hashed names are matched, never written.
 public struct KnownHosts: Sendable {
   public let path: String
 
@@ -681,6 +680,26 @@ public struct KnownHosts: Sendable {
     return verdict
   }
 
+  /// The key types on record for a host, as the client offers them in
+  /// KEXINIT (an RSA record stands for the rsa-sha2-* signatures).
+  public func keyTypes(host: String, port: Int) -> [String] {
+    guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+    let name = KnownHosts.name(host: host, port: port)
+    var types: [String] = []
+    for line in text.split(separator: "\n") {
+      let f = line.split(separator: " ", omittingEmptySubsequences: true)
+      guard f.count >= 3, f[0].split(separator: ",").contains(where: { KnownHosts.names(name, $0) })
+      else {
+        continue
+      }
+      let offered = f[1] == "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [String(f[1])]
+      for t in offered where !types.contains(t) {
+        types.append(t)
+      }
+    }
+    return types
+  }
+
   /// Whether a known_hosts host field names `name`: as written, or hashed
   /// (`|1|salt|HMAC-SHA1(salt, name)`, what HashKnownHosts writes and many
   /// servers' files carry); a hashed line that never matched would let a
@@ -718,12 +737,12 @@ public struct KnownHosts: Sendable {
   /// goes, the file as it was kept in known_hosts.old. How many went.
   public func remove(host: String, port: Int) throws -> Int {
     guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return 0 }
-    let name = Substring(KnownHosts.name(host: host, port: port))
+    let name = KnownHosts.name(host: host, port: port)
     var kept: [Substring] = []
     var gone = 0
     for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
       let first = line.split(separator: " ", maxSplits: 1).first ?? ""
-      if first.split(separator: ",").contains(name) {
+      if first.split(separator: ",").contains(where: { KnownHosts.names(name, $0) }) {
         gone += 1
       } else {
         kept.append(line)

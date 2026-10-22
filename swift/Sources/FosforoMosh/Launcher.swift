@@ -83,6 +83,35 @@ public final class Launcher: Transport, @unchecked Sendable {
     self.vault = vault ?? Launcher.deviceVault
     self.ssh = ssh
     home = ssh.deletingLastPathComponent()
+    Launcher.liveLock.lock()
+    Launcher.live.append(Weak(launcher: self))
+    Launcher.liveLock.unlock()
+  }
+
+  /// Every launcher in the process, one per window: a relock reaches each.
+  private struct Weak {
+    weak var launcher: Launcher?
+  }
+  private static let liveLock = NSLock()
+  nonisolated(unsafe) private static var live: [Weak] = []  // under liveLock
+
+  /// The app after a while in the background: the vault asks for the owner
+  /// again, and no passphrase typed before is remembered either.
+  public static func relock() {
+    deviceVault?.relock()
+    liveLock.lock()
+    live.removeAll { $0.launcher == nil }
+    let all = live.compactMap(\.launcher)
+    liveLock.unlock()
+    for l in all {
+      l.forgetPassphrases()
+    }
+  }
+
+  private func forgetPassphrases() {
+    lock.lock()
+    passphrases.removeAll()
+    lock.unlock()
   }
 
   /// ~/.ssh/id_rsa rather than the full path of the app's container.
@@ -562,6 +591,10 @@ public final class Launcher: Transport, @unchecked Sendable {
     return t
   }
 
+  private static func isPublicLine(_ line: some StringProtocol) -> Bool {
+    line.hasPrefix("ssh-") || line.hasPrefix("ecdsa-")
+  }
+
   /// The authorized_keys line for a key file (private, protected or .pub).
   private func publicKey(of url: URL) throws -> String {
     var path = url.path
@@ -570,8 +603,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     }
     let pubFile = URL(fileURLWithPath: path + ".pub")
     if let pub = try? String(contentsOf: pubFile, encoding: .utf8),
-      let line = pub.split(separator: "\n").first,
-      line.hasPrefix("ssh-") || line.hasPrefix("ecdsa-")
+      let line = pub.split(separator: "\n").first, Launcher.isPublicLine(line)
     {
       return String(line)
     }
@@ -604,6 +636,10 @@ public final class Launcher: Transport, @unchecked Sendable {
   /// The shell's user (init.filo's User, or the device's): ssh's default,
   /// as the local login is on a computer.
   public var localUser: String?
+  /// The shell's host name (the device's, as the prompt shows it): what
+  /// ssh-keygen -t writes after the @. ProcessInfo's hostName would look
+  /// it up in DNS, which can stall for seconds.
+  public var localHost: String?
 
   /// What the app's clipboard holds; set by the app (UIKit lives there).
   public var clipboard: (() -> String?)?
@@ -888,7 +924,7 @@ public final class Launcher: Transport, @unchecked Sendable {
       finish()
       return
     }
-    let who = "\(localUser ?? NSUserName())@\(ProcessInfo.processInfo.hostName)"
+    let who = "\(localUser ?? NSUserName())@\(localHost ?? "localhost")"
     let job = Keygen(type: type, bits: bits, file: url, comment: comment ?? who)
     if let passphrase {
       write(job, passphrase: passphrase)
@@ -1421,7 +1457,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     try makeSSHDirectory()
     let dest = ssh.appendingPathComponent(name)
     var pub: Data?
-    if parts.count == 2, String(decoding: parts[1], as: UTF8.self).hasPrefix("ssh-") {
+    if parts.count == 2, Launcher.isPublicLine(String(decoding: parts[1], as: UTF8.self)) {
       pub = Data(parts[1])
     }
     try savePair(Data(parts[0]), pub, to: dest)
@@ -1525,6 +1561,7 @@ public final class Launcher: Transport, @unchecked Sendable {
         self.lock.lock()
         self.remote = nil
         self.status = st
+        self.passphrases.removeAll()  // the session is over: asked again next time
         if lost != nil {
           self.question = .reconnect(t)
         }
@@ -1556,6 +1593,8 @@ public final class Launcher: Transport, @unchecked Sendable {
   public func hangup() {
     lock.lock()
     closed = true
+    question = nil  // a reconnect offer holds the target, its password with it
+    passphrases.removeAll()
     let r = remote
     let c = cancelConnect
     cancelConnect = nil

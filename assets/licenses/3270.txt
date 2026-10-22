@@ -1,3 +1,5 @@
+The 3270 font
+
 Copyright 2022 The 3270font Authors (https://github.com/rbanffy/3270font)
 Copyright (c) 2011-2022, Ricardo Banffy.
 Copyright (c) 1993-2011, Paul Mattes.

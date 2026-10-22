@@ -87,6 +87,7 @@ final class Server {
     c.port = port
     c.keys = [try PrivateKey.openSSH(userKey)]
     c.command = command
+    c.acceptNewHostKeys = true  // a fresh sshd each time: trust on first use
     return c
   }
 }
@@ -898,6 +899,7 @@ private func authorize(_ server: Server, _ keys: [PrivateKey]) throws {
   #expect(PrivateKey.isEncrypted(curva))
   let cpub = try String(contentsOf: ssh.appendingPathComponent("curva.pub"), encoding: .utf8)
   #expect(cpub.hasPrefix("ecdsa-sha2-nistp384 "))
+  #expect(cpub.hasSuffix(" \(NSUserName())@localhost\n"))  // no hostName lookup: it can stall
   let cseen = try Server.output(
     "/usr/bin/ssh-keygen", ["-y", "-P", "segredo", "-f", ssh.appendingPathComponent("curva").path])
   #expect(cseen.split(separator: " ").prefix(2) == cpub.split(separator: " ").prefix(2))
@@ -1061,6 +1063,14 @@ private func authorize(_ server: Server, _ keys: [PrivateKey]) throws {
   s.send("key fetch -p \(server.port) \(NSUserName())@127.0.0.1:/etc/hosts h\r")
   #expect(waitScreen(s, "is not a private key"))
   #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(".ssh/h").path))
+  // an ecdsa .pub starts with ecdsa-, not ssh-: it comes along all the same
+  let curve = server.dir.appendingPathComponent("remote_ecdsa")
+  _ = try keygen(curve, ["-t", "ecdsa"])
+  s.send("key fetch -p \(server.port) \(NSUserName())@127.0.0.1:\(curve.path) id_ecdsa\r")
+  #expect(waitScreen(s, "saved ~/.ssh/id_ecdsa and its .pub (in plain text"))
+  #expect(
+    try String(contentsOf: dir.appendingPathComponent(".ssh/id_ecdsa.pub"), encoding: .utf8)
+      .hasPrefix("ecdsa-sha2-nistp256 "))
 }
 
 @Test func protectedKeysLogInAndComeBack() throws {

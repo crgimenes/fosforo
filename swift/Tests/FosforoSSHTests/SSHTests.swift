@@ -77,6 +77,7 @@ final class Server {
     c.port = port
     c.keys = [try PrivateKey.openSSH(userKey)]
     c.command = command
+    c.acceptNewHostKeys = true  // a fresh sshd each time: trust on first use
     return c
   }
 }
@@ -117,6 +118,12 @@ final class Collector: @unchecked Sendable {
       self.closed = true
       self.lock.unlock()
     }
+  }
+
+  var bytes: [UInt8] {
+    lock.lock()
+    defer { lock.unlock() }
+    return data
   }
 
   var text: String {
@@ -1217,4 +1224,108 @@ private final class Heard: @unchecked Sendable {
   ch.start()
   #expect(heard.all == ["close - ssh: disconnected: gone"])
   withExtendedLifetime(client) {}
+}
+
+/// ssh-keygen -R takes a hashed line (HashKnownHosts) for the host too,
+/// as check() matches it; the file as it was stays in known_hosts.old.
+@Test func removeTakesHashedLines() throws {
+  let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: dir) }
+  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  let file = dir.appendingPathComponent("known_hosts")
+  func hashed(_ name: String) -> String {
+    let salt = Data((0..<20).map { _ in UInt8.random(in: 0...255) })
+    let mac = HMAC<Insecure.SHA1>.authenticationCode(
+      for: Data(name.utf8), using: SymmetricKey(data: salt))
+    return "|1|\(salt.base64EncodedString())|\(Data(mac).base64EncodedString())"
+  }
+  let key = PrivateKey.ed25519(.init()).authorizedKey
+  let kept = "other \(key)\n\(hashed("box")) \(key)\n"
+  let text = "\(hashed("[lab.example]:2222")) \(key)\n" + kept
+  try text.write(to: file, atomically: true, encoding: .utf8)
+  let kh = KnownHosts(path: file.path)
+  #expect(try kh.remove(host: "lab.example", port: 2222) == 1)
+  #expect(try String(contentsOf: file, encoding: .utf8) == kept)
+  #expect(try String(contentsOfFile: file.path + ".old", encoding: .utf8) == text)
+  #expect(try kh.remove(host: "lab.example", port: 2222) == 0)
+}
+
+/// The host key types known_hosts has for a host go first in KEXINIT, as
+/// OpenSSH orders them: a host on record by its RSA key that also has an
+/// ed25519 one is then known, not new. The list is only reordered.
+@Test func knownHostKeyTypesAreOfferedFirst() throws {
+  let all = SSHClient.hostKeyAlgorithms
+  #expect(SSHClient.preferring([], in: all) == all)
+  #expect(
+    SSHClient.preferring(["rsa-sha2-512", "rsa-sha2-256"], in: all) == [
+      "rsa-sha2-512", "rsa-sha2-256", "ssh-ed25519", "ecdsa-sha2-nistp256",
+    ])
+  #expect(
+    SSHClient.preferring(["ecdsa-sha2-nistp256", "ssh-dss"], in: all) == [
+      "ecdsa-sha2-nistp256", "ssh-ed25519", "rsa-sha2-512", "rsa-sha2-256",
+    ])
+  let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: dir) }
+  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  let file = dir.appendingPathComponent("known_hosts")
+  let ed = PrivateKey.ed25519(.init()).authorizedKey
+  try "box ssh-rsa AAAA\nbox,other \(ed)\nelsewhere ecdsa-sha2-nistp256 AAAA\n".write(
+    to: file, atomically: true, encoding: .utf8)
+  let kh = KnownHosts(path: file.path)
+  #expect(kh.keyTypes(host: "box", port: 22) == ["rsa-sha2-512", "rsa-sha2-256", "ssh-ed25519"])
+  #expect(kh.keyTypes(host: "other", port: 22) == ["ssh-ed25519"])
+  #expect(kh.keyTypes(host: "box", port: 2222) == [])
+  #expect(KnownHosts(path: "/nonexistent").keyTypes(host: "box", port: 22) == [])
+}
+
+/// A SOCKS client that connects and says nothing is dropped once the
+/// handshake's time is up, instead of holding a thread for good.
+@Test func silentSocksClientIsDropped() throws {
+  let server = try Server()
+  var c = try server.config()
+  let port = freePort()
+  c.dynamicForwards = [SSHConfig.Forward(bindPort: port, host: "", port: 0)]
+  c.noSession = true
+  let client = SSHClient(config: c)
+  client.socksTimeout = 0.5
+  try client.connect()
+  defer { client.disconnect() }
+  let fd = try dialBounded(port)
+  defer { close(fd) }
+  let began = Date()
+  var b: UInt8 = 0
+  #expect(read(fd, &b, 1) == 0, "the proxy did not close the connection")
+  #expect(Date().timeIntervalSince(began) < 3)
+}
+
+/// RFC 4344: the client asks for new keys itself after so many bytes, or
+/// so long, with the server's limits far off; what was being typed and
+/// what the server was sending come through intact and in order.
+@Test func clientRekeysOnItsOwnLimits() throws {
+  let server = try Server()
+  let input = (0..<(1 << 20)).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 >> 8) }
+  let ready = Array("READY\n".utf8)
+  for byTime in [false, true] {
+    // raw: the pty neither echoes nor translates what goes through
+    let client = SSHClient(
+      config: try server.config(command: "stty raw -echo; echo READY; head -c \(input.count)"))
+    if byTime {
+      client.rekeyAfter = 0.2
+    } else {
+      client.rekeyBytes = 256 * 1024
+    }
+    let out = Collector()
+    out.attach(client)
+    try client.connect()
+    client.start()
+    #expect(out.wait(until: { out.count >= ready.count }))
+    if byTime {
+      Thread.sleep(forTimeInterval: 0.4)
+    }
+    client.send(input)
+    #expect(out.wait(seconds: 60))
+    #expect(out.error == nil)
+    #expect(client.exchanges > 1, "the client never rekeyed (\(byTime ? "time" : "bytes"))")
+    #expect(out.bytes == ready + input, "\(out.count) of \(input.count) bytes back")
+  }
 }

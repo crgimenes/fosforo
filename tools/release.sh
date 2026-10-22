@@ -71,7 +71,7 @@ echo "signed $app with $identity"
 
 if [ "$notarize" = 1 ]; then
     rm -f "$work/submission.zip"
-    ditto -c -k --keepParent "$app" "$work/submission.zip"
+    ditto -c -k --keepParent --norsrc "$app" "$work/submission.zip"
     xcrun notarytool submit "$work/submission.zip" --keychain-profile "$APPLE_NOTARY_PROFILE" \
         --output-format plist --timeout 30m --wait >"$work/notarization.plist"
     status=$(plutil -extract status raw "$work/notarization.plist")
@@ -88,7 +88,17 @@ if [ "$notarize" = 1 ]; then
 fi
 
 rm -f "$zip"
-ditto -c -k --keepParent "$app" "$zip"
+# --norsrc: without it ditto stores the xattrs the system puts on every built
+# file as ._ entries inside Contents/, and unzip (the README's way) leaves
+# them there as files, which breaks the seal: Gatekeeper calls the app damaged
+ditto -c -k --keepParent --norsrc "$app" "$zip"
+rm -rf "$work/unzipped"
+mkdir -p "$work/unzipped"
+unzip -q "$zip" -d "$work/unzipped"
+codesign --verify --deep --strict "$work/unzipped/fosforo.app"
+if [ "$notarize" = 1 ]; then
+    spctl --assess --type execute "$work/unzipped/fosforo.app"
+fi
 tools/manifest.sh "$zip" >"$zip.manifest"
 echo "$zip ($(du -h "$zip" | cut -f1)), $zip.manifest"
 

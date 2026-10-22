@@ -94,7 +94,7 @@
       case .keys: keys.count + 2
       case .device: 4
       case .appearance: 4
-      case .about: 4
+      case .about: 5
       case nil: 0
       }
     }
@@ -225,9 +225,12 @@
         case 2:
           c.text = "Privacy Policy"
           cell.accessoryType = .disclosureIndicator
-        default:
+        case 3:
           c.text = "Source"
           c.secondaryText = "github.com/crgimenes/fosforo"
+          cell.accessoryType = .disclosureIndicator
+        default:
+          c.text = "Credits"
           cell.accessoryType = .disclosureIndicator
         }
       case nil: break
@@ -272,6 +275,8 @@
         if let url = URL(string: "https://github.com/crgimenes/fosforo") {
           UIApplication.shared.open(url)
         }
+      case .about where indexPath.row == 4:
+        navigationController?.pushViewController(CreditsViewer(), animated: true)
       default: break
       }
     }
@@ -478,6 +483,49 @@
 
   /// One server: its block in ~/.ssh/config.
   @MainActor
+  /// Settings > About > Credits: the third-party notices, as the Mac's About.
+  final class CreditsViewer: UIViewController {
+    /// The notices come hard-wrapped at 72 columns, too wide for a phone: a
+    /// line continues the one before unless that ended a sentence or this
+    /// one starts an item (a copyright line, a bullet, a numbered clause).
+    static func reflowed(_ notices: String) -> String {
+      var out: [String] = []
+      for raw in notices.split(separator: "\n", omittingEmptySubsequences: false) {
+        let line = raw.trimmingCharacters(in: .whitespaces)
+        let item =
+          line.isEmpty || line.hasPrefix("*") || line.hasPrefix("Copyright")
+          || line.first?.isNumber == true && line.dropFirst().hasPrefix(".")
+        if let last = out.last, !last.isEmpty, !item, !last.hasSuffix("."), !last.hasSuffix(":") {
+          out[out.count - 1] = last + " " + line
+        } else {
+          out.append(line)
+        }
+      }
+      return out.joined(separator: "\n")
+    }
+
+    override func viewDidLoad() {
+      super.viewDidLoad()
+      title = "Credits"
+      view.backgroundColor = .systemBackground
+      let text = UITextView()
+      text.text = CreditsViewer.reflowed(Credits.text)
+      text.isEditable = false
+      text.font = .preferredFont(forTextStyle: .footnote)
+      text.textColor = .label
+      text.adjustsFontForContentSizeCategory = true
+      text.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+      text.translatesAutoresizingMaskIntoConstraints = false
+      view.addSubview(text)
+      NSLayoutConstraint.activate([
+        text.topAnchor.constraint(equalTo: view.topAnchor),
+        text.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        text.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+        text.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      ])
+    }
+  }
+
   final class HostEditor: UITableViewController {
     private var host: SSHHostsFile.Host
     private let original: String?  // the alias it had in the file

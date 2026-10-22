@@ -131,6 +131,16 @@ cat >"$set/Contents.json" <<EOF
   "info" : { "author" : "xcode", "version" : 1 }
 }
 EOF
+# UILaunchScreen's color (Info-iOS.plist): the terminal's black from the first
+# frame, not the system's white
+launch=$out/Assets.xcassets/Launch.colorset
+mkdir -p "$launch"
+cat >"$launch/Contents.json" <<EOF
+{
+  "colors" : [ { "color" : { "color-space" : "srgb", "components" : { "alpha" : "1.000", "blue" : "0.000", "green" : "0.000", "red" : "0.000" } }, "idiom" : "universal" } ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}
+EOF
 xcrun actool "$out/Assets.xcassets" --compile "$app" --platform iphoneos \
     --minimum-deployment-target "$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$plist")" \
     --target-device iphone --target-device ipad --app-icon AppIcon \

@@ -243,10 +243,20 @@
       guard let ws = scene as? UIWindowScene else { return }
       let theme = (try? Theme.load()) ?? Theme()  // read per window, like Cmd+N on the Mac
       let window = UIWindow(windowScene: ws)
-      window.rootViewController = TerminalController(theme: theme)
+      let directory = session.stateRestorationActivity?.userInfo?["directory"] as? String
+      window.rootViewController = TerminalController(theme: theme, directory: directory)
       window.makeKeyAndVisible()
       self.window = window
       Importer.offer(connectionOptions.urlContexts.map(\.url), from: terminals)
+    }
+
+    /// Killed in the background, the window comes back where its front
+    /// session was: the directory is all a local shell can be given back.
+    func stateRestorationActivity(for scene: UIScene) -> NSUserActivity? {
+      guard let directory = terminals?.frontDirectory else { return nil }
+      let activity = NSUserActivity(activityType: "br.eti.crg.fosforo.window")
+      activity.userInfo = ["directory": directory]
+      return activity
     }
 
     /// "Open in fosforo" while the app is running.
@@ -285,7 +295,7 @@
     /// As banking apps do: after a while away, the owner is asked again.
     func sceneWillEnterForeground(_ scene: UIScene) {
       if let t = backgroundSince, Date().timeIntervalSince(t) > SceneDelegate.relockAfter {
-        Launcher.deviceVault?.relock()
+        Launcher.relock()
       }
       backgroundSince = nil
     }
@@ -401,9 +411,20 @@
     private var views: [TerminalView] = []
     private var current = 0
 
-    init(theme: Theme) {
+    /// directory: where the first session opens; the home when nil or gone.
+    init(theme: Theme, directory: String? = nil) {
       self.theme = theme
+      self.startDirectory = directory
       super.init(nibName: nil, bundle: nil)
+    }
+
+    private let startDirectory: String?
+
+    /// The front session's rocchetto directory, under any ssh; nil when
+    /// there is no session.
+    var frontDirectory: String? {
+      guard views.indices.contains(current) else { return nil }
+      return (views[current].session.transport as? ShellSwitch)?.directory
     }
 
     @available(*, unavailable)
@@ -413,7 +434,7 @@
       view = UIView()
       view.backgroundColor = .black
       do {
-        try add()
+        try add(directory: startDirectory)
       } catch {
         let label = UILabel()
         label.text = "fosforo: \(error)"
@@ -441,6 +462,7 @@
       launcher.clipboard = { UIPasteboard.general.string }
       let who = identity(theme)
       launcher.localUser = who.user
+      launcher.localHost = who.host
       let banner = art(theme.banner, default: Theme().banner, bundled: "banner")
       let narrow = art(theme.bannerNarrow, default: Theme().bannerNarrow, bundled: "banner-narrow")
       let shell = try ShellSwitch(
@@ -504,6 +526,11 @@
       if views.indices.contains(current) {
         views[current].session.focus(on)
       }
+      if on {
+        for v in views {
+          v.wake()
+        }
+      }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -518,9 +545,8 @@
 
     @objc func newSession() {
       // where the session in front is: its rocchetto's directory, under any ssh
-      let front = views.indices.contains(current) ? views[current] : nil
       do {
-        try add(directory: (front?.session.transport as? ShellSwitch)?.directory)
+        try add(directory: frontDirectory)
       } catch {
         complain("New session", error)
       }

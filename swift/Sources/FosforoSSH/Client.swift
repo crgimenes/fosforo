@@ -16,7 +16,7 @@ public struct SSHConfig: Sendable {
   public var knownHosts: KnownHosts
   /// Trust on first use. An unknown key is refused when false; a changed
   /// key is always refused.
-  public var acceptNewHostKeys = true
+  public var acceptNewHostKeys = false
   /// The unknown key the user saw and accepted: taken only if presented
   /// again, so a yes to one fingerprint is never a yes to another.
   public var acceptedHostKey: [UInt8]?
@@ -130,7 +130,7 @@ public final class SSHClient: @unchecked Sendable {
   static let window: UInt32 = 2 * 1024 * 1024
   static let maxPacket: UInt32 = 32768
 
-  let config: SSHConfig
+  private(set) var config: SSHConfig
   var io: PacketIO?
   let lock = NSLock()  // packet writes, the channels and the state below
   private var serverVersion = ""
@@ -138,6 +138,18 @@ public final class SSHClient: @unchecked Sendable {
   private var hostKey: [UInt8] = []
   private var strict = false
   fileprivate var kexActive = false
+  private var knownKeyTypes: [String] = []  // what known_hosts has for this host: offered first
+  /// RFC 4344: new keys after this much either way, or this long. Lowered
+  /// by tests.
+  var rekeyBytes = 1 << 30
+  var rekeyAfter: TimeInterval = 3600
+  private var rekeyable = false  // once authenticated: never during the first exchange
+  private var sentSinceKex = 0
+  private var recvSinceKex = 0
+  private var keyedAt = Date()
+  private var ourKexinit: [UInt8]?  // sent from the send path, the server's answer still to come
+  private var deferred: [[UInt8]] = []  // packets held while a key exchange runs
+  var socksTimeout: TimeInterval = 10  // a -D client's handshake; lowered by tests
   var channels: [UInt32: SSHChannel] = [:]
   private var nextID: UInt32 = 0
   private var main: SSHChannel?  // the first channel: what the client's own callbacks speak for
@@ -179,7 +191,24 @@ public final class SSHClient: @unchecked Sendable {
   }
 
   fileprivate func writeLocked(_ payload: [UInt8]) throws {
+    // RFC 4253 7.1: after KEXINIT only transport messages until NEWKEYS;
+    // the rest waits, in order
+    if kexActive, let t = payload.first, t >= 50 {
+      deferred.append(payload)
+      return
+    }
     try conn.writePacket(payload)
+    sentSinceKex += payload.count
+    guard rekeyable, !kexActive, rekeyDue else { return }
+    kexActive = true
+    let ours = kexinit()
+    ourKexinit = ours
+    try conn.writePacket(ours)
+  }
+
+  private var rekeyDue: Bool {
+    sentSinceKex >= rekeyBytes || recvSinceKex >= rekeyBytes
+      || Date().timeIntervalSince(keyedAt) >= rekeyAfter
   }
 
   private func write(_ payload: [UInt8]) throws {
@@ -231,10 +260,15 @@ public final class SSHClient: @unchecked Sendable {
     guard serverVersion.hasPrefix("SSH-2.0-") || serverVersion.hasPrefix("SSH-1.99-") else {
       throw SSHError.unsupported("protocol \(serverVersion)")
     }
+    knownKeyTypes = config.knownHosts.keyTypes(host: config.host, port: config.port)
     try keyExchange(serverKexinit: nil)
     note("key exchange done (\(negotiatedKex))")
     try authenticate()
     note("authenticated as \(config.user)")
+    lock.lock()
+    config.password = nil  // served; not kept for the connection's lifetime
+    rekeyable = true
+    lock.unlock()
     // from here the reader owns the socket: channels open through it
     let reader = Thread { [self] in run() }
     reader.name = "fosforo.ssh.reader"
@@ -411,9 +445,16 @@ public final class SSHClient: @unchecked Sendable {
       return w.bytes
     }
   }
-  private static let hostKeyAlgorithms = [
+  static let hostKeyAlgorithms = [
     "ssh-ed25519", "ecdsa-sha2-nistp256", "rsa-sha2-512", "rsa-sha2-256",
   ]
+
+  /// As OpenSSH orders HostKeyAlgorithms: the types known_hosts already
+  /// has for the host first, so a host known by its RSA key that grew an
+  /// ed25519 one is not a stranger. Only reordered: nothing is added.
+  static func preferring(_ known: [String], in offered: [String]) -> [String] {
+    offered.filter { known.contains($0) } + offered.filter { !known.contains($0) }
+  }
   private static let ciphers = ["aes256-gcm@openssh.com", "aes128-gcm@openssh.com"]
   private static let macs = ["hmac-sha2-256-etm@openssh.com", "hmac-sha2-256"]
 
@@ -423,7 +464,7 @@ public final class SSHClient: @unchecked Sendable {
     _ = SecRandomCopyBytes(kSecRandomDefault, 16, &cookie)
     w.bytes += cookie
     w.nameList(SSHClient.kexAlgorithms)
-    w.nameList(SSHClient.hostKeyAlgorithms)
+    w.nameList(SSHClient.preferring(knownKeyTypes, in: SSHClient.hostKeyAlgorithms))
     w.nameList(SSHClient.ciphers)
     w.nameList(SSHClient.ciphers)
     w.nameList(SSHClient.macs)
@@ -452,14 +493,20 @@ public final class SSHClient: @unchecked Sendable {
 
   private func keyExchange(serverKexinit: [UInt8]?) throws {
     let initial = sessionID.isEmpty
-    let ours = kexinit()
     lock.lock()
-    kexActive = true
-    do {
-      try writeLocked(ours)
-    } catch {
-      lock.unlock()
-      throw error
+    let ours: [UInt8]
+    if let sent = ourKexinit {  // ours went first: the server's KEXINIT is the answer
+      ours = sent
+      ourKexinit = nil
+    } else {
+      ours = kexinit()
+      kexActive = true
+      do {
+        try writeLocked(ours)
+      } catch {
+        lock.unlock()
+        throw error
+      }
     }
     lock.unlock()
     var theirs = serverKexinit
@@ -558,6 +605,14 @@ public final class SSHClient: @unchecked Sendable {
     lock.lock()
     kexActive = false
     exchanges += 1
+    sentSinceKex = 0
+    recvSinceKex = 0
+    keyedAt = Date()
+    let held = deferred
+    deferred.removeAll()
+    for p in held {
+      try? writeLocked(p)
+    }
     for ch in channels.values {
       try? ch.flushLocked()
     }
@@ -855,7 +910,7 @@ public final class SSHClient: @unchecked Sendable {
           var socks: SocksRequest?
           do {
             if f.port == 0 {
-              socks = try socksRequest(conn)
+              socks = try socksRequest(conn, timeout: socksTimeout)
             }
             let host = socks?.host ?? f.host
             let port = socks?.port ?? f.port
@@ -1029,6 +1084,7 @@ public final class SSHClient: @unchecked Sendable {
     lock.lock()
     heard = Date()
     unanswered = 0
+    recvSinceKex += p.count
     lock.unlock()
     return p
   }

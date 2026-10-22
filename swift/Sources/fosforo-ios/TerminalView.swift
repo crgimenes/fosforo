@@ -174,6 +174,11 @@
       session.hangup()
     }
 
+    /// The scene is active again: what came while it was away is drawn now.
+    func wake() {
+      link?.isPaused = isHidden
+    }
+
     func start() {
       guard link == nil else { return }
       let l = CADisplayLink(target: self, selector: #selector(tick))
@@ -830,7 +835,9 @@
     }
 
     @objc private func tick() {
-      guard !isHidden else {  // another session of the window is showing
+      // hidden: another session of the window is showing; not active: a frame
+      // committed from the background is what the GPU watchdog kills
+      guard !isHidden, window?.windowScene?.activationState == .foregroundActive else {
         link?.isPaused = true
         return
       }

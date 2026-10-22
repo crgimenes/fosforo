@@ -916,7 +916,9 @@ static void history_save(host_state *h) {
 static froc *do_fmsh_new(const char *root, const char *user, const char *host_name,
                          const char *commands, uint16_t cols, uint16_t rows) {
     char *real = realpath(root, NULL);
-    if (real == NULL) {
+    struct stat st;
+    if (real == NULL || stat(real, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        free(real);
         return NULL;
     }
     host_state *h = calloc(1, sizeof(*h));

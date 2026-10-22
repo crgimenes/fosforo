@@ -126,6 +126,114 @@ static void test_hook_values_do_not_fill_the_arena(cfg_var *v, char *err) {
     cfg_close(s);
 }
 
+/* Builtins called the wrong way, a value over the cap, no themes
+   directory, a theme file over the cap: each refused with what it was. */
+static void test_errors(cfg_var *v, char *err) {
+    CHECK(run("(set FontName (getEnv 1 2))", v, err) != 0 && strstr(err, "getEnv wants") != NULL);
+    char src[512];
+    char name[301];
+    memset(name, 'N', 300);
+    name[300] = '\0';
+    snprintf(src, sizeof(src), "(set FontName (getEnv \"%s\" \"x\"))", name);
+    CHECK(run(src, v, err) != 0 && strstr(err, "name too long") != NULL);
+    CHECK(run("(theme 1)", v, err) != 0 && strstr(err, "theme wants") != NULL);
+    CHECK(run("(notify 1)", v, err) != 0 && strstr(err, "notify wants") != NULL);
+    CHECK(run("(event-arg 1)", v, err) != 0 && strstr(err, "takes nothing") != NULL);
+    char text[CFG_STR_MAX + 1];
+    memset(text, 's', CFG_STR_MAX - 1);
+    text[CFG_STR_MAX - 1] = '\0';
+    snprintf(src, sizeof(src), "(set FontName \"%s\")", text);
+    CHECK(run(src, v, err) == 0 && strlen(v[2].str) == CFG_STR_MAX - 1);
+    text[CFG_STR_MAX - 1] = 's';
+    text[CFG_STR_MAX] = '\0';
+    snprintf(src, sizeof(src), "(set FontName \"%s\")", text);
+    CHECK(run(src, v, err) != 0 && strstr(err, "longer than 255") != NULL);
+    CHECK(strcmp(v[2].str, "3270-Regular") == 0);
+
+    defaults(v);
+    const char *pick = "(theme \"big\")";
+    CHECK(cfg_run((const uint8_t *)pick, strlen(pick), NULL, v, 3, err, 256) != 0);
+    CHECK(strstr(err, "no themes directory") != NULL);
+
+    enum { HUGE_THEME = 70000 };
+    char *huge = malloc(HUGE_THEME + 1);
+    CHECK(huge != NULL);
+    if (huge == NULL) {
+        return;
+    }
+    memset(huge, ';', HUGE_THEME);
+    huge[HUGE_THEME] = '\0';
+    write_theme("huge", huge);
+    free(huge);
+    CHECK(run("(theme \"huge\")", v, err) != 0 && strstr(err, "larger than 65536") != NULL);
+}
+
+/* Handlers that fail: a theme that is not there, one that does not run
+   (at once, or the second time), past the themes kept, a handler that
+   errors itself; the session stays usable after each. */
+static void test_hook_errors(cfg_var *v, char *err) {
+    write_theme("grow", "(set FontSize (if (> FontSize 100) (error \"boom\") 200))");
+    char name[16];
+    char body[64];
+    for (int i = 0; i < 8; i++) {
+        snprintf(name, sizeof(name), "t%d", i);
+        snprintf(body, sizeof(body), "(set FontSize %d)", 50 + i);
+        write_theme(name, body);
+    }
+    defaults(v);
+    const char *src = "(set on-title (fn (a) (theme a)))\n"
+                      "(set on-bell (fn (a) (theme \"grow\")))\n"
+                      "(set on-close (fn (a) (error \"boom\")))\n"
+                      "(set on-prompt (fn (a) (notify 1)))";
+    cfg_session *s = cfg_open((const uint8_t *)src, strlen(src), themes, v, 3, err, 256);
+    CHECK(s != NULL);
+    if (s == NULL) {
+        return;
+    }
+    char note[64];
+    CHECK(cfg_fire(s, "title", "missing", v, 3, note, sizeof(note), err, 256) != 0);
+    CHECK(strstr(err, "theme \"missing\": no ") != NULL);
+    CHECK(cfg_fire(s, "title", "broken", v, 3, note, sizeof(note), err, 256) != 0);
+    CHECK(strstr(err, "themes/broken.filo: line 2") != NULL);
+    CHECK(cfg_fire(s, "bell", NULL, v, 3, note, sizeof(note), err, 256) == 0 && v[0].num == 200);
+    err[0] = '\0';
+    CHECK(cfg_fire(s, "bell", NULL, v, 3, note, sizeof(note), err, 256) != 0 && err[0] != '\0');
+    for (int i = 0; i < 7; i++) { /* grow and seven more fill the eight kept */
+        snprintf(name, sizeof(name), "t%d", i);
+        CHECK(cfg_fire(s, "title", name, v, 3, note, sizeof(note), err, 256) == 0);
+        CHECK(v[0].num == 50 + i);
+    }
+    CHECK(cfg_fire(s, "title", "t7", v, 3, note, sizeof(note), err, 256) != 0);
+    CHECK(strstr(err, "more than 8 themes") != NULL);
+    CHECK(cfg_fire(s, "title", "t0", v, 3, note, sizeof(note), err, 256) == 0 && v[0].num == 50);
+    CHECK(cfg_fire(s, "close", NULL, v, 3, note, sizeof(note), err, 256) != 0);
+    CHECK(strncmp(err, "on-close: ", 10) == 0);
+    CHECK(cfg_fire(s, "prompt", NULL, v, 3, note, sizeof(note), err, 256) != 0);
+    CHECK(strstr(err, "notify wants") != NULL);
+    CHECK(cfg_fire(s, "title", "t1", v, 2, note, sizeof(note), err, 256) != 0);
+    CHECK(strstr(err, "no handler for title") != NULL);
+    CHECK(cfg_fire(s, NULL, NULL, v, 3, note, sizeof(note), err, 256) != 0);
+    CHECK(strstr(err, "no handler for ?") != NULL);
+    CHECK(!cfg_has(NULL, "bell") && !cfg_has(s, NULL));
+    CHECK(cfg_fire(s, "title", "t1", v, 3, note, sizeof(note), err, 256) == 0 && v[0].num == 51);
+    cfg_close(s);
+
+    /* no themes directory: (theme) from a handler is the handler's error */
+    defaults(v);
+    src = "(set on-focus (fn (a) (theme \"t0\")))";
+    s = cfg_open((const uint8_t *)src, strlen(src), NULL, v, 3, err, 256);
+    CHECK(s != NULL);
+    if (s == NULL) {
+        return;
+    }
+    CHECK(cfg_fire(s, "focus", NULL, v, 3, note, sizeof(note), err, 256) != 0);
+    CHECK(strstr(err, "on-focus: ") != NULL && strstr(err, "no themes directory") != NULL);
+    cfg_close(s);
+    src = "\n(set on-bell (fn (a) a))\n(set Nope 1)";
+    CHECK(cfg_open((const uint8_t *)src, strlen(src), themes, v, 3, err, 256) == NULL);
+    CHECK(strncmp(err, "line 3", 6) == 0);
+}
+
 int main(void) {
     cfg_var v[3];
     char err[256] = "";
@@ -152,7 +260,8 @@ int main(void) {
 
     CHECK(run(";; only comments\n", v, err) == 0);
     CHECK(run("(def helper 1)", v, err) != 0);
-    CHECK(run("(set FontSize (len (map (fn (x) x) (range 1048576))))", v, err) != 0);
+    CHECK(run("(set FontSize (length (map (fn (x) x) (range 1048576))))", v, err) != 0);
+    CHECK(strstr(err, "arena") != NULL); /* the arena fills, not a name Filo lacks */
 
     setenv("FOSFORO_CFG_TEST", "Monaco", 1);
     CHECK(run("(set FontName (getEnv \"FOSFORO_CFG_TEST\" \"x\"))", v, err) == 0);
@@ -163,11 +272,15 @@ int main(void) {
     test_themes(v, err);
     test_hooks(v, err);
     test_hook_values_do_not_fill_the_arena(v, err);
+    test_errors(v, err);
+    test_hook_errors(v, err);
+    static const char *const made[] = {"big", "broken", "huge", "grow", "t0", "t1",
+                                       "t2",  "t3",     "t4",   "t5",   "t6", "t7"};
     char path[512];
-    snprintf(path, sizeof(path), "%s/big.filo", dir);
-    unlink(path);
-    snprintf(path, sizeof(path), "%s/broken.filo", dir);
-    unlink(path);
+    for (size_t i = 0; i < sizeof(made) / sizeof(made[0]); i++) {
+        snprintf(path, sizeof(path), "%s/%s.filo", dir, made[i]);
+        unlink(path);
+    }
     rmdir(dir);
 
     if (failures > 0) {

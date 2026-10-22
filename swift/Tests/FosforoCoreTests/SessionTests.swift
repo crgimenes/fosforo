@@ -962,3 +962,94 @@ private func rowText(_ row: [vt_cell]) -> String {
   show()
   #expect(vp.selectedText() == "1")
 }
+
+/// The bar names the branch and, on the Mac, git's own count of commits
+/// ahead of and behind the upstream: two made here and not pushed, one
+/// another clone pushed, fetched. Before git answers, the bare push mark.
+@Test(.enabled(if: GitCounts.git != nil))
+func statusBarCountsCommitsAheadAndBehind() throws {
+  let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: root) }
+  func git(_ dir: URL, _ args: [String]) throws {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: GitCounts.git!)
+    p.arguments =
+      [
+        "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+        "-c", "init.defaultBranch=trunk",
+      ] + args
+    p.currentDirectoryURL = dir
+    p.environment = [
+      "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "HOME": root.path,
+      "PATH": "/usr/bin:/bin",
+    ]
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try p.run()
+    p.waitUntilExit()
+    #expect(p.terminationStatus == 0, "git \(args)")
+  }
+  let origin = root.appendingPathComponent("origin.git").path
+  let here = root.appendingPathComponent("here")
+  let there = root.appendingPathComponent("there")
+  try git(root, ["init", "-q", "--bare", origin])
+  try git(root, ["clone", "-q", origin, here.path])
+  try git(here, ["commit", "-q", "--allow-empty", "-m", "one"])
+  try git(here, ["push", "-q", "-u", "origin", "trunk"])
+  try git(root, ["clone", "-q", origin, there.path])
+  try git(there, ["commit", "-q", "--allow-empty", "-m", "theirs"])
+  try git(there, ["push", "-q"])
+  try git(here, ["commit", "-q", "--allow-empty", "-m", "mine"])
+  try git(here, ["commit", "-q", "--allow-empty", "-m", "mine too"])
+  try git(here, ["fetch", "-q"])
+
+  let s = try Session(
+    transport: Canned("\u{1b}]7;file://localhost\(here.path)\u{7}"), rows: 2, cols: 120,
+    history: 0)
+  s.start()
+  let bar = StatusBar()
+  func shown() -> String {
+    rowText(bar.cells(s, position: (1, 1), cols: 120)).trimmingCharacters(in: .whitespaces)
+  }
+  let first = shown()
+  #expect(first.hasSuffix("trunk ↑"), "\(first)")  // asked, not answered yet
+  var text = first
+  #expect(
+    eventually {
+      text = shown()
+      return text.contains("↓")
+    })
+  #expect(text.hasSuffix("trunk ↑2 ↓1"), "\(text)")
+  #expect(text.contains(" │ \(here.path) │ "))
+}
+
+/// A transport with a name for the bar (ssh user@host) and output given
+/// at once.
+private final class Labeled: Transport, @unchecked Sendable {
+  let bytes: [UInt8]
+  init(_ text: String) { bytes = Array(text.utf8) }
+  func start(
+    output: @escaping @Sendable ([UInt8]) -> Void, exit: @escaping @Sendable (Int32) -> Void
+  ) {
+    output(bytes)
+  }
+  func send(_ bytes: [UInt8]) {}
+  func resize(rows: Int, cols: Int) {}
+  func hangup() {}
+  var label: String? { "ssh crg@box" }
+}
+
+/// Copy mode and the transport's name go between n/N and the directory; a
+/// directory elsewhere has no branch, and with nothing on the right the
+/// row ends blank.
+@Test func statusBarShowsCopyModeAndWhereTheSessionIs() throws {
+  let s = try Session(
+    transport: Labeled("\u{1b}]7;file://elsewhere.example/srv/app\u{7}"), rows: 2, cols: 50,
+    history: 0)
+  s.start()
+  let row = StatusBar().cells(s, position: (2, 3), cols: 50, copying: true)
+  #expect(row.count == 50)
+  #expect(
+    rowText(row).trimmingCharacters(in: .whitespaces) == "2/3 │ COPY │ ssh crg@box │ /srv/app")
+}

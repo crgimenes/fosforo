@@ -17,7 +17,7 @@ public final class Vault: @unchecked Sendable {
   private let lock = NSLock()
   private let file: URL  // the vault key: an opaque Secure Enclave blob, or a software key in tests
   private let secureEnclave: Bool
-  private var context = LAContext()
+  var context = LAContext()  // internal: tests see relock replace it
   /// Set when the device has no passcode: the key is then made without the
   /// presence check (still bound to this device), and this says so.
   public private(set) var withoutPresence = false

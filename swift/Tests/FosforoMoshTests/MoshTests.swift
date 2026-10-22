@@ -1479,3 +1479,202 @@ func moshPredictsTypingButNotPasswords() throws {
   #expect(try String(contentsOf: pub, encoding: .utf8) == "ssh-ed25519 theirs\n")
   #expect(try fm.contentsOfDirectory(atPath: ssh.path).sorted() == ["corrida", "meia.pub"])
 }
+
+/// The app back from the background (Launcher.relock): every window's
+/// launcher forgets the passphrases typed into it for the session still
+/// open, so a reconnect would ask again. bcrypt at one round: the test is
+/// about asking, not about the kdf.
+@Test func relockForgetsPassphrasesInEveryWindow() throws {
+  let server = try Server()
+  let first = server.dir.appendingPathComponent("a")
+  let second = server.dir.appendingPathComponent("b")
+  let key = try keygen(
+    try sshDir(first).appendingPathComponent("id_ed25519"), ["-t", "ed25519", "-a", "1"],
+    pass: "segredo")
+  for name in ["id_ed25519", "id_ed25519.pub"] {
+    try FileManager.default.copyItem(
+      at: first.appendingPathComponent(".ssh/\(name)"),
+      to: try sshDir(second).appendingPathComponent(name))
+  }
+  try authorize(server, [key])
+  _ = testLauncher(server.dir.appendingPathComponent("gone"))  // its window closed already
+  let launchers = [testLauncher(first), testLauncher(second)]
+  // two names for the host: two connections, not one shared by both windows
+  let windows = try zip(launchers, ["127.0.0.1", "localhost"]).map { launcher, host in
+    let s = try Session(transport: Typed(launcher), rows: 24, cols: 120, history: 200)
+    s.start()
+    #expect(waitScreen(s, "test> "))
+    s.send("ssh -p \(server.port) \(NSUserName())@\(host)\r")
+    #expect(waitScreen(s, "(yes/no)"))
+    s.send("yes\r")
+    #expect(waitScreen(s, "passphrase for ~/.ssh/id_ed25519"))
+    s.send("segredo\r")
+    s.send("echo um-$((6*7))\r")
+    #expect(waitScreen(s, "um-42"))
+    return s
+  }
+  #expect(launchers.allSatisfy { $0.passphrases.values.contains("segredo") })
+  Launcher.relock()
+  #expect(launchers.allSatisfy { $0.passphrases.isEmpty })
+  for s in windows {
+    s.send("exit\r")
+    #expect(waitScreen(s, "[0]"))
+  }
+}
+
+/// The window's size reaches the login (the pty is asked for at it) and,
+/// once the session runs, each resize after it.
+@Test func resizeReachesTheRemoteSide() throws {
+  let server = try Server()
+  let launcher = testLauncher(server.dir.appendingPathComponent("device"))
+  try authorize(server, [try launcher.deviceKey()])
+  let s = try Session(transport: Typed(launcher), rows: 24, cols: 100, history: 100)
+  s.start()
+  #expect(waitScreen(s, "test> "))
+  s.resize(rows: 30, cols: 90)
+  s.send("ssh -p \(server.port) \(NSUserName())@127.0.0.1\r")
+  #expect(waitScreen(s, "(yes/no)"))
+  s.send("yes\r")
+  s.send("stty size\r")
+  #expect(waitScreen(s, "30 90"))
+  s.resize(rows: 33, cols: 101)
+  s.send("stty size; exit\r")
+  #expect(waitScreen(s, "33 101"))
+}
+
+/// A key file is written whole and 0600, or not at all: replace false
+/// leaves the file there untouched and says so, with no temporary left; a
+/// directory that is not there is an error naming the step.
+@Test func storeNeverWritesOverWhenAskedNotTo() throws {
+  let fm = FileManager.default
+  let dir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+  defer { try? fm.removeItem(at: dir) }
+  let url = dir.appendingPathComponent("id_test")
+  try "theirs\n".write(to: url, atomically: true, encoding: .utf8)
+  #expect(throws: SSHError.io("\(url.path) exists; nothing written")) {
+    try Launcher.store(Data("mine\n".utf8), at: url, replace: false)
+  }
+  #expect(try String(contentsOf: url, encoding: .utf8) == "theirs\n")
+  #expect(try fm.contentsOfDirectory(atPath: dir.path) == ["id_test"])
+  try Launcher.store(Data("mine\n".utf8), at: url)
+  #expect(try String(contentsOf: url, encoding: .utf8) == "mine\n")
+  #expect((try fm.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int) == 0o600)
+  do {
+    try Launcher.store(Data(), at: dir.appendingPathComponent("none/id_test"))
+    Issue.record("wrote into a directory that is not there")
+  } catch {
+    #expect("\(error.localizedDescription)".hasPrefix("create "))
+  }
+}
+
+/// key protect takes the public line from the key itself (ed25519, ECDSA,
+/// RSA in plain text), from a locked OpenSSH container, or from the .pub
+/// of a locked PEM key; a locked PEM key without one is refused, as is
+/// a file that is no key, and protecting at all where there is no vault.
+@Test func protectFindsThePublicLineOfEachKind() throws {
+  let dir = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "protect-" + UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: dir) }
+  let ssh = try sshDir(dir)
+  var want: [String: String] = [:]
+  for (name, args, pass) in [
+    ("ed", ["-t", "ed25519"], ""), ("ec", ["-t", "ecdsa", "-b", "384"], ""),
+    ("rsa", ["-t", "rsa", "-b", "2048"], ""), ("locked", ["-t", "ed25519", "-a", "1"], "abc"),
+  ] {
+    let path = ssh.appendingPathComponent(name)
+    _ = try keygen(path, args, pass: pass)
+    let pub = try String(contentsOfFile: path.path + ".pub", encoding: .utf8)
+    want[name] = pub.split(separator: " ").prefix(2).joined(separator: " ")
+  }
+  // the container carries the public half in the clear: no .pub needed
+  try FileManager.default.removeItem(at: ssh.appendingPathComponent("locked.pub"))
+  let pem = ssh.appendingPathComponent("pem")
+  try Server.run(
+    "/usr/bin/openssl", ["genrsa", "-aes128", "-passout", "pass:abc", "-out", pem.path, "2048"])
+  try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: pem.path)
+  try "no key\n".write(to: ssh.appendingPathComponent("notes"), atomically: true, encoding: .utf8)
+
+  let vault = Vault(file: dir.appendingPathComponent("vault"), secureEnclave: false)
+  let s = try Session(
+    transport: Typed(testLauncher(dir, vault: vault)), rows: 24, cols: 120, history: 200)
+  s.start()
+  #expect(waitScreen(s, "test> "))
+  s.send("key protect pem\r")
+  #expect(waitScreen(s) { $0.contains("needs its .pub beside it") && $0.contains("[1]") })
+  // ssh-keygen -y writes a PEM key's .pub with no comment: "ssh-rsa AAAA…\n"
+  let pemPub = try Server.output("/usr/bin/ssh-keygen", ["-y", "-P", "abc", "-f", pem.path])
+  try pemPub.write(toFile: pem.path + ".pub", atomically: true, encoding: .utf8)
+  want["pem"] = pemPub.trimmingCharacters(in: .newlines)
+  s.send("key protect pem\r")
+  #expect(waitScreen(s, "(yes/no)"))
+  s.send("no\r")
+  #expect(waitScreen(s) { $0.contains("nothing changed") && $0.contains("[0]") })
+  try (want["pem"]! + " pem@test\n").write(
+    toFile: pem.path + ".pub", atomically: true, encoding: .utf8)
+  for name in ["ed", "ec", "rsa", "locked", "pem"] {
+    s.send("key protect \(name)\r")
+    #expect(waitScreen(s, "(yes/no)"), "\(name)")
+    s.send("yes\r")
+    #expect(waitScreen(s) { $0.contains("protected ~/.ssh/\(name)") && $0.contains("[0]") })
+    let sealed = try String(contentsOf: ssh.appendingPathComponent(name), encoding: .utf8)
+    #expect(Vault.publicLine(sealed) == want[name], "\(name)")
+  }
+  s.send("key protect notes\r")
+  #expect(waitScreen(s, "not a private key in plain form"))
+
+  let plain = try Session(transport: Typed(testLauncher(dir)), rows: 24, cols: 120, history: 200)
+  plain.start()
+  #expect(waitScreen(plain, "test> "))
+  plain.send("key protect ed\r")
+  #expect(waitScreen(plain, "key protect: only on iPad and iPhone"))
+}
+
+/// ssh-keygen -t refuses what it cannot make, before asking anything: a
+/// type, ECDSA bits, a flag without its value, a flag it does not know.
+@Test func keygenRefusesWhatItCannotMake() throws {
+  let dir = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "keygen-" + UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: dir) }
+  let ssh = try sshDir(dir)
+  let s = try Session(transport: Typed(testLauncher(dir)), rows: 24, cols: 120, history: 200)
+  s.start()
+  #expect(waitScreen(s, "test> "))
+  for (line, says) in [
+    ("ssh-keygen -t dsa", "usage: ssh-keygen -t ed25519|ecdsa"),
+    ("ssh-keygen -t ecdsa -b 1024", "ecdsa keys take 256, 384 or 521 bits"),
+    ("ssh-keygen -t ecdsa -b big", "ecdsa keys take 256, 384 or 521 bits"),
+    ("ssh-keygen -t", "usage: ssh-keygen -t ed25519|ecdsa"),
+    ("ssh-keygen -t ed25519 -q yes", "usage: ssh-keygen -t ed25519|ecdsa"),
+  ] {
+    s.send(line + "\r")
+    #expect(waitScreen(s) { $0.contains(says) && $0.contains("[1]") }, "\(line)")
+  }
+  #expect(try FileManager.default.contentsOfDirectory(atPath: ssh.path).isEmpty)
+}
+
+/// Hanging up asks mosh-server to end the session: the client is done
+/// after its shutdown tries, and the server process goes.
+@Test(.enabled(if: FileManager.default.isExecutableFile(atPath: moshServer)))
+func moshHangupEndsTheServer() throws {
+  let server = try Server()
+  let ep = try MoshTransport.bootstrap(ssh: try server.config(), server: moshServer)
+  guard let pid = ep.serverPID.map({ pid_t($0) }) else {
+    Issue.record("mosh-server gave no pid")
+    return
+  }
+  defer { kill(pid, SIGTERM) }
+  let mosh = try MoshTransport(endpoint: ep, rows: 24, cols: 80)
+  let s = try Session(transport: mosh, rows: 24, cols: 80, history: 0)
+  s.start()
+  s.send("echo up-$((6*7))\r")
+  #expect(waitScreen(s, "up-42"))
+  #expect(kill(pid, 0) == 0)
+  mosh.hangup()
+  let deadline = Date().addingTimeInterval(10)
+  while (!s.hasExited || kill(pid, 0) == 0) && Date() < deadline {
+    Thread.sleep(forTimeInterval: 0.05)
+  }
+  #expect(s.hasExited)
+  #expect(kill(pid, 0) == -1 && errno == ESRCH, "mosh-server \(pid) still runs")
+}

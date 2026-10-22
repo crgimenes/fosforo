@@ -1,6 +1,8 @@
 import CFosforo
 import CoreText
 import FosforoCore
+import Foundation
+import ImageIO
 import Metal
 import Testing
 
@@ -539,4 +541,82 @@ func nerdFontIconsComeFromTheSymbolsFont() throws {
   r.blink()
   r.blink()
   #expect(r.cursorOn)
+}
+
+/// SGR 2 mixes the color a third of the way to the background; SGR 8
+/// hides the text in it.
+@Test func faintAndInvisibleText() throws {
+  let faint = try Frame("\u{1b}[2;31;42m█")
+  #expect(faint.all(row: 0, cols: 0, 1, 0x7C3E00))  // (2 * BB0000 + 00BB00) / 3
+  let hidden = try Frame("\u{1b}[8;31;42m█")
+  #expect(hidden.all(row: 0, cols: 0, 1, 0x00BB00))
+}
+
+/// The color of pixel (x, y) of an image, as 0xRRGGBB.
+private func rgb(_ image: CGImage, _ x: Int, _ y: Int) -> UInt32 {
+  var px = [UInt8](repeating: 0, count: 4)
+  let info = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
+  px.withUnsafeMutableBytes { buf in
+    let ctx = CGContext(
+      data: buf.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: info)!
+    ctx.draw(
+      image, in: CGRect(x: -x, y: y - image.height + 1, width: image.width, height: image.height))
+  }
+  return UInt32(px[0]) << 16 | UInt32(px[1]) << 8 | UInt32(px[2])
+}
+
+/// The PNG a script asks for: the grid's size in pixels, one more row
+/// with the status bar, its cells in their colors; a path that cannot be
+/// written is an error.
+@Test func snapshotWritesTheGridAsPNG() throws {
+  var theme = Theme()
+  theme.fontSize = 14
+  let r = try Renderer(theme: theme, scale: 1)
+  let term = try Terminal(rows: 2, cols: 3, history: 0)
+  theme.apply { term.configure(color: $0, rgb: $1) }
+  term.write("\u{1b}[41m \u{1b}[0m\r\n")  // the cursor out of the way, on row 1
+  var screen = Screen()
+  term.snapshot(into: &screen)
+  let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: dir) }
+  let m = r.metrics
+  for bar in [false, true] {
+    r.statusBar = bar
+    let path = dir.appendingPathComponent("shot-\(bar).png").path
+    try r.snapshot(screen, to: path)
+    guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+      let image = CGImageSourceCreateImageAtIndex(src, 0, nil)
+    else {
+      Issue.record("no PNG at \(path)")
+      continue
+    }
+    #expect(image.width == 3 * m.width)
+    #expect(image.height == (bar ? 3 : 2) * m.height)
+    #expect(rgb(image, m.width / 2, m.height / 2) == 0xBB0000)
+    #expect(rgb(image, m.width + m.width / 2, m.height / 2) == 0x000000)
+  }
+  #expect(throws: RenderError.self) { try r.snapshot(screen, to: "/nonexistent/x/shot.png") }
+}
+
+/// A screen of another density draws the atlas again at it (the same one
+/// changes nothing); the grid that fits an area follows the cells, leaves
+/// a row to the status bar and never goes under 1x1.
+@Test func scaleAndGridSize() throws {
+  var theme = Theme()
+  theme.fontSize = 14
+  let r = try Renderer(theme: theme, scale: 1)
+  let one = r.metrics
+  try r.setScale(1)
+  #expect(r.metrics.width == one.width && r.metrics.height == one.height)
+  try r.setScale(2)
+  let two = r.metrics
+  #expect(two.width >= 2 * one.width - 1 && two.height >= 2 * one.height - 1)
+  let size = r.gridSize(width: 10 * two.width + two.width - 1, height: 4 * two.height + 1)
+  #expect(size.rows == 4 && size.cols == 10)
+  r.statusBar = true
+  #expect(r.gridSize(width: 10 * two.width, height: 4 * two.height).rows == 3)
+  let least = r.gridSize(width: 1, height: 1)
+  #expect(least.rows == 1 && least.cols == 1)
 }

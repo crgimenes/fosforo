@@ -1304,6 +1304,204 @@ static void test_dots_in_names(const char *root) {
     froc_free(s);
 }
 
+/* A resize lays the next listing out to the new width, repaints the pager
+   at once and waits while an app command has the terminal; exit ends the
+   session and nothing typed after it runs. */
+static void test_resize_and_exit(const char *root) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/sz", root);
+    CHECK(mkdir(path, 0755) == 0);
+    for (int i = 1; i <= 6; i++) {
+        snprintf(path, sizeof(path), "%s/sz/aaaa%d", root, i);
+        put(path, "x\n");
+    }
+    snprintf(path, sizeof(path), "%s/page.txt", root);
+    FILE *f = fopen(path, "wb");
+    CHECK(f != NULL);
+    for (int i = 0; f != NULL && i < 100; i++) {
+        fprintf(f, "page line %d\n", i);
+    }
+    if (f != NULL) {
+        fclose(f);
+    }
+    froc *s = froc_new(root, "teste", "box", "ssh", 80, 24);
+    CHECK(s != NULL);
+    take(s);
+    type(s, "ls sz\r");
+    CHECK(strstr(take(s), "aaaa1  aaaa2  aaaa3  aaaa4  aaaa5  aaaa6\r\n") != NULL);
+    froc_resize(s, 12, 24);
+    type(s, "ls sz\r");
+    CHECK(strstr(take(s), "aaaa1  aaaa4\r\naaaa2  aaaa5\r\naaaa3  aaaa6\r\n") != NULL);
+    type(s, "less page.txt\r");
+    take(s);
+    froc_resize(s, 40, 5);
+    const char *o = take(s);
+    CHECK(strstr(o, "page line 3") != NULL && strstr(o, "page line 4") == NULL);
+    type(s, "q");
+    take(s);
+    type(s, "ssh x\r");
+    char cmd[64];
+    CHECK(froc_command(s, cmd, sizeof(cmd)) > 0);
+    take(s);
+    froc_resize(s, 80, 24);
+    CHECK(take(s)[0] == '\0');
+    froc_done(s, 0);
+    froc_tick(s, 50);
+    take(s);
+    type(s, "ls sz\r");
+    CHECK(strstr(take(s), "aaaa1  aaaa2  aaaa3  aaaa4  aaaa5  aaaa6\r\n") != NULL);
+    CHECK(!froc_exited(s));
+    type(s, "exit\r");
+    CHECK(froc_exited(s) && strstr(take(s), "NO CARRIER") != NULL);
+    type(s, "echo after\r");
+    CHECK(strstr(take(s), "\nafter") == NULL);
+    froc_free(s);
+    unlink(path);
+    for (int i = 1; i <= 6; i++) {
+        snprintf(path, sizeof(path), "%s/sz/aaaa%d", root, i);
+        unlink(path);
+    }
+    snprintf(path, sizeof(path), "%s/sz", root);
+    rmdir(path);
+}
+
+/* No spool for a | that outgrows memory (TMPDIR missing, or too long to
+   name a file in): the command says the stream was cut and fails, rather
+   than pass a short one on as if whole. */
+static void test_spool_unavailable(const char *root) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/many", root);
+    FILE *f = fopen(path, "wb");
+    CHECK(f != NULL);
+    for (int i = 1; f != NULL && i <= 100000; i++) {
+        fprintf(f, "line %d\n", i);
+    }
+    if (f != NULL) {
+        fclose(f);
+    }
+    const char *was = getenv("TMPDIR");
+    char *old = was != NULL ? strdup(was) : NULL;
+    char missing[512];
+    snprintf(missing, sizeof(missing), "%s/no-such-dir", root);
+    static char longdir[1100];
+    memset(longdir, 'd', sizeof(longdir) - 1);
+    longdir[0] = '/';
+    longdir[sizeof(longdir) - 1] = '\0';
+    const char *dirs[] = {missing, longdir};
+    froc *s = froc_new(root, "teste", "box", NULL, 80, 24);
+    CHECK(s != NULL);
+    take(s);
+    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
+        setenv("TMPDIR", dirs[i], 1);
+        type(s, "cat many | wc -l > o; echo st=$?\r");
+        const char *o = take(s);
+        CHECK(strstr(o, "Output too large: the rest is cut") != NULL && strstr(o, "st=1") != NULL);
+    }
+    if (old != NULL) {
+        setenv("TMPDIR", old, 1);
+        free(old);
+    } else {
+        unsetenv("TMPDIR");
+    }
+    type(s, "cat many | wc -l > o\r");
+    char buf[64];
+    snprintf(path, sizeof(path), "%s/o", root);
+    CHECK(strcmp(slurp(path, buf, sizeof(buf)), "100000\n") == 0);
+    froc_free(s);
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/many", root);
+    unlink(path);
+}
+
+static bool temp_left(const char *dir) {
+    DIR *d = opendir(dir);
+    bool found = false;
+    struct dirent *e;
+    while (d != NULL && (e = readdir(d)) != NULL) {
+        found = found || strstr(e->d_name, "fosforo-tmp") != NULL;
+    }
+    if (d != NULL) {
+        closedir(d);
+    }
+    return found;
+}
+
+/* Writes the disk refuses (a directory made behind the shell's back where
+   the file would go, a directory without write permission) fail with the
+   shell saying so, keep what was there and leave no temporary behind. */
+static void test_write_refused(const char *root) {
+    froc *s = froc_new(root, "teste", "box", NULL, 80, 24);
+    CHECK(s != NULL);
+    take(s);
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/adir", root);
+    CHECK(mkdir(dir, 0755) == 0);
+    type(s, "echo x > adir; echo st=$?\r");
+    const char *o = take(s);
+    CHECK(strstr(o, "Is a directory") != NULL && strstr(o, "st=1") != NULL);
+    struct stat st;
+    CHECK(stat(dir, &st) == 0 && S_ISDIR(st.st_mode));
+    rmdir(dir);
+    snprintf(dir, sizeof(dir), "%s/ro", root);
+    CHECK(mkdir(dir, 0755) == 0);
+    type(s, "echo x > ro/f\r");
+    CHECK(chmod(dir, 0500) == 0);
+    type(s, "echo y > ro/f; echo st=$?\r");
+    CHECK(strstr(take(s), "st=1") != NULL);
+    type(s, "echo z > ro/g; echo st=$?\r");
+    CHECK(strstr(take(s), "st=1") != NULL);
+    CHECK(chmod(dir, 0755) == 0);
+    char path[512];
+    char buf[64];
+    snprintf(path, sizeof(path), "%s/ro/f", root);
+    CHECK(strcmp(slurp(path, buf, sizeof(buf)), "x\n") == 0);
+    CHECK(!temp_left(root) && !temp_left(dir));
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/ro/g", root);
+    CHECK(access(path, F_OK) != 0);
+    rmdir(dir);
+    froc_free(s);
+}
+
+/* A history file that does not end in a newline (cut short, or written by
+   hand) gets one before the new lines. */
+static void test_history_without_newline(const char *root) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/.roc_history", root);
+    put(path, "old-one\nold-two");
+    froc *s = froc_new(root, "teste", "box", NULL, 80, 24);
+    CHECK(s != NULL);
+    take(s);
+    type(s, "echo new-line\r");
+    froc_free(s);
+    char buf[256];
+    CHECK(strcmp(slurp(path, buf, sizeof(buf)), "old-one\nold-two\necho new-line\n") == 0);
+    unlink(path);
+}
+
+/* A root that is not there opens nothing; a user name the prompt cannot
+   show is guest, with the home where the shell looks for it. */
+static void test_new_session_edges(const char *root) {
+    CHECK(froc_new("/nonexistent-fosforo-root", "teste", "box", NULL, 80, 24) == NULL);
+    froc_free(NULL);
+    char cwd[256];
+    froc *s = froc_new(root, "bad user", "box", NULL, 80, 24);
+    CHECK(s != NULL);
+    CHECK(froc_cwd(s, cwd, sizeof(cwd)) > 0 && strcmp(cwd, "/home/guest") == 0);
+    CHECK(strstr(take(s), "guest@box") != NULL);
+    froc_free(s);
+    s = froc_new(root, NULL, NULL, NULL, 80, 24);
+    CHECK(s != NULL && froc_cwd(s, cwd, sizeof(cwd)) > 0 && strcmp(cwd, "/home/guest") == 0);
+    froc_free(s);
+    /* a root that is not a directory opens no session: every write in it
+       would fail */
+    char file[512];
+    snprintf(file, sizeof(file), "%s/plain", root);
+    put(file, "x");
+    CHECK(froc_new(file, "teste", "box", NULL, 80, 24) == NULL);
+    unlink(file);
+}
+
 int main(void) {
     char root[] = "/tmp/fosforo-rochost-XXXXXX";
     if (mkdtemp(root) == NULL) {
@@ -1333,7 +1531,16 @@ int main(void) {
     test_link_loops(root);
     test_modes_kept(root);
     test_dots_in_names(root);
-    rmdir(root);
+    test_resize_and_exit(root);
+    test_spool_unavailable(root);
+    test_write_refused(root);
+    test_history_without_newline(root);
+    test_new_session_edges(root);
+    char rm[64];
+    snprintf(rm, sizeof(rm), "rm -rf %s", root); /* root is mkdtemp's: no quoting needed */
+    if (system(rm) != 0) {
+        fprintf(stderr, "could not remove %s\n", root);
+    }
     if (failures > 0) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

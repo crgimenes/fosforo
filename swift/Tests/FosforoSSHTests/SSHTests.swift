@@ -29,7 +29,9 @@ final class Server {
     port = Int.random(in: 30000...49151)  // below the ephemeral range
     // PerSourcePenalties: the tests connect from 127.0.0.1 over and over, many
     // closing before auth, which sshd (9.8 on) punishes by refusing the source
+    // extra first: sshd keeps a keyword's first value, so it can override these
     let config = """
+      \(extra)
       ListenAddress 127.0.0.1
       Port \(port)
       HostKey \(dir.path)/host
@@ -40,7 +42,6 @@ final class Server {
       PasswordAuthentication no
       KbdInteractiveAuthentication no
       PerSourcePenalties no
-      \(extra)
       """
     try config.write(
       to: dir.appendingPathComponent("sshd_config"), atomically: true, encoding: .utf8)

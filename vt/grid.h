@@ -40,17 +40,14 @@ void grid_clear_history(vt_grid *g);
 void grid_scroll_up(vt_grid *g, int top, int bot, int n, vt_cell blank, int history);
 void grid_scroll_down(vt_grid *g, int top, int bot, int n, vt_cell blank);
 
-/* Rewraps every line to the new width keeping the cursor on the character it
-   was on; ccol in as cols means the insertion point past the last column (a
-   wrap pending), and comes back as cols when it still is. Returns -1 on
-   allocation failure, grid untouched. */
-int grid_reflow(vt_grid *g, int rows, int cols, int *crow, int *ccol);
-
-/* Resize without reflow (alternate screen): keeps the top-left corner. */
-int grid_clip(vt_grid *g, int rows, int cols, int *crow, int *ccol);
-
-/* The same, as a new grid in *out with g untouched: a caller resizing two
-   grids installs both or neither (grid_free the one it does not). */
+/* Resizes as a new grid in *out with g untouched: a caller resizing two
+   grids installs both or neither (grid_free the one it does not). -1 on
+   allocation failure.
+   reflow rewraps every line to the new width keeping the cursor on the
+   character it was on; ccol in as cols means the insertion point past the
+   last column (a wrap pending), and comes back as cols when it still is.
+   clip resizes without reflow (alternate screen), keeping the top-left
+   corner. */
 int grid_reflow_into(const vt_grid *g, int rows, int cols, int *crow, int *ccol, vt_grid *out);
 int grid_clip_into(const vt_grid *g, int rows, int cols, int *crow, int *ccol, vt_grid *out);
 

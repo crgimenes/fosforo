@@ -952,7 +952,7 @@ public final class Launcher: Transport, @unchecked Sendable {
     }
   }
 
-  private var passphrases: [String: String] = [:]  // key file path → passphrase, memory only
+  var passphrases: [String: String] = [:]  // file path → passphrase, memory only; tests read it
 
   /// The keys of a target, opened as far as they can be without asking:
   /// a locked key is offered by its public half and asks for its

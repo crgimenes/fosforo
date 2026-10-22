@@ -57,7 +57,8 @@ public struct PrivateKey: @unchecked Sendable {
     }
     var blob: [UInt8]
     if text.contains(pemBegin) {
-      let fields = (pub ?? "").split(separator: " ")
+      // ssh-keygen -y writes no comment: the line ends right after the base64
+      let fields = (pub ?? "").split(whereSeparator: \.isWhitespace)
       guard fields.count >= 2, let data = Data(base64Encoded: String(fields[1])) else {
         throw SSHError.locked(name)  // nothing to ask the server with: the passphrase first
       }

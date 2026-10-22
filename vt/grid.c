@@ -382,26 +382,6 @@ static int build(const vt_grid *g, const lines *l, int first, int nlines, int ro
     return 0;
 }
 
-int grid_reflow(vt_grid *g, int rows, int cols, int *crow, int *ccol) {
-    vt_grid out;
-    if (grid_reflow_into(g, rows, cols, crow, ccol, &out) != 0) {
-        return -1;
-    }
-    grid_free(g);
-    *g = out;
-    return 0;
-}
-
-int grid_clip(vt_grid *g, int rows, int cols, int *crow, int *ccol) {
-    vt_grid out;
-    if (grid_clip_into(g, rows, cols, crow, ccol, &out) != 0) {
-        return -1;
-    }
-    grid_free(g);
-    *g = out;
-    return 0;
-}
-
 int grid_reflow_into(const vt_grid *g, int rows, int cols, int *crow, int *ccol, vt_grid *out) {
     if (rows < 1 || cols < 1) {
         return -1;

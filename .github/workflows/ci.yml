@@ -23,27 +23,27 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/rocchetto
-          ref: fbc49afd567884caa8e37c0a26c72b452647ec72
+          ref: 092174ca7a436f201495a6681cb2f3b66d6cf403
           path: rocchetto
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
-          ref: 772fd0a3074b8b81c8f851bd9f8fc5609459acb1
+          ref: 3627a806d1173c0cde4cb875a8230033f810164f
           path: clang_filo
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
-          ref: f16ae12648b7e24cefa1a27230f428afb4fdc1e2
+          ref: d1d800b73fa4d17281aa09dba85a51c563604956
           path: filo-term
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/corewar
-          ref: 1ea35b51c0e91e6c47622d278812ad938e53de56
+          ref: 10561ea48b38a7676626c0edd30c6fb43201a5b6
           path: corewar
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/edt
-          ref: 375e891f70923ec64b2e1ff156b186d39eff5062
+          ref: 5ca89e909bf3f24e71d8df58aa746a9039b79766
           path: edt
       - run: make -C fosforo all test
 
@@ -59,27 +59,27 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/rocchetto
-          ref: fbc49afd567884caa8e37c0a26c72b452647ec72
+          ref: 092174ca7a436f201495a6681cb2f3b66d6cf403
           path: rocchetto
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
-          ref: 772fd0a3074b8b81c8f851bd9f8fc5609459acb1
+          ref: 3627a806d1173c0cde4cb875a8230033f810164f
           path: clang_filo
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
-          ref: f16ae12648b7e24cefa1a27230f428afb4fdc1e2
+          ref: d1d800b73fa4d17281aa09dba85a51c563604956
           path: filo-term
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/corewar
-          ref: 1ea35b51c0e91e6c47622d278812ad938e53de56
+          ref: 10561ea48b38a7676626c0edd30c6fb43201a5b6
           path: corewar
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/edt
-          ref: 375e891f70923ec64b2e1ff156b186d39eff5062
+          ref: 5ca89e909bf3f24e71d8df58aa746a9039b79766
           path: edt
       - run: brew install mosh
       - run: make -C fosforo swift-fmt swift-build swift-test
@@ -97,12 +97,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
-          ref: 772fd0a3074b8b81c8f851bd9f8fc5609459acb1
+          ref: 3627a806d1173c0cde4cb875a8230033f810164f
           path: clang_filo
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
-          ref: f16ae12648b7e24cefa1a27230f428afb4fdc1e2
+          ref: d1d800b73fa4d17281aa09dba85a51c563604956
           path: filo-term
       - run: brew install llvm
       - run: make -C fosforo fuzz LLVM="$(brew --prefix llvm)/bin" FUZZ_SECONDS=60
@@ -130,27 +130,27 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/rocchetto
-          ref: fbc49afd567884caa8e37c0a26c72b452647ec72
+          ref: 092174ca7a436f201495a6681cb2f3b66d6cf403
           path: rocchetto
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
-          ref: 772fd0a3074b8b81c8f851bd9f8fc5609459acb1
+          ref: 3627a806d1173c0cde4cb875a8230033f810164f
           path: clang_filo
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
-          ref: f16ae12648b7e24cefa1a27230f428afb4fdc1e2
+          ref: d1d800b73fa4d17281aa09dba85a51c563604956
           path: filo-term
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/corewar
-          ref: 1ea35b51c0e91e6c47622d278812ad938e53de56
+          ref: 10561ea48b38a7676626c0edd30c6fb43201a5b6
           path: corewar
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/edt
-          ref: 375e891f70923ec64b2e1ff156b186d39eff5062
+          ref: 5ca89e909bf3f24e71d8df58aa746a9039b79766
           path: edt
       - run: brew install llvm cppcheck
       - run: make -C fosforo fmt-check tidy check LLVM="$(brew --prefix llvm)/bin"
@@ -169,27 +169,27 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/rocchetto
-          ref: fbc49afd567884caa8e37c0a26c72b452647ec72
+          ref: 092174ca7a436f201495a6681cb2f3b66d6cf403
           path: rocchetto
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/clang_filo
-          ref: 772fd0a3074b8b81c8f851bd9f8fc5609459acb1
+          ref: 3627a806d1173c0cde4cb875a8230033f810164f
           path: clang_filo
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/filo-term
-          ref: f16ae12648b7e24cefa1a27230f428afb4fdc1e2
+          ref: d1d800b73fa4d17281aa09dba85a51c563604956
           path: filo-term
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/corewar
-          ref: 1ea35b51c0e91e6c47622d278812ad938e53de56
+          ref: 10561ea48b38a7676626c0edd30c6fb43201a5b6
           path: corewar
       - uses: actions/checkout@v7
         with:
           repository: crgimenes/edt
-          ref: 375e891f70923ec64b2e1ff156b186d39eff5062
+          ref: 5ca89e909bf3f24e71d8df58aa746a9039b79766
           path: edt
       - run: make -C fosforo ios-sim
       # the debug build launched in a throwaway simulator, no window:

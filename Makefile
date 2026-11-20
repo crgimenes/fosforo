@@ -9,13 +9,13 @@ ROC ?= ../rocchetto
 ROC_APPS ?= APPS_COREWAR=0
 
 WARN = -Wall -Wextra -Werror -Wshadow -Wconversion -Wdouble-promotion -Wundef
-INC = -Ivt -Iglyph -Ipty -Iconfig -I$(FILO_TERM)/src -I$(FILO)
+INC = -Ivt -Iglyph -Ipty -Iconfig -I$(FILO_TERM)/src -I$(FILO)/src
 FLAGS = -std=c11 $(WARN) $(INC)
 VT_SRC = vt/vt.c vt/grid.c vt/input.c $(FILO_TERM)/src/utf8.c
-FILO_SRC = $(addprefix $(FILO)/,filo.c filo_math.c filo_strings.c filo_libc.c filo_fmt.c)
+FILO_SRC = $(addprefix $(FILO)/src/,filo.c filo_math.c filo_strings.c filo_libc.c filo_fmt.c)
 C_SRC = $(VT_SRC) glyph/glyph.c pty/pty.c config/cfg.c $(FILO_SRC)
 OWN_C = vt/vt.c vt/grid.c vt/input.c glyph/glyph.c pty/pty.c config/cfg.c
-HDRS = $(wildcard vt/*.h glyph/*.h pty/*.h config/*.h) $(FILO_TERM)/src/utf8.h $(FILO_TERM)/src/width_table.h $(FILO)/filo.h
+HDRS = $(wildcard vt/*.h glyph/*.h pty/*.h config/*.h) $(FILO_TERM)/src/utf8.h $(FILO_TERM)/src/width_table.h $(FILO)/src/filo.h
 FMT_FILES = $(OWN_C) rochost/main.c rochost/host.c rochost/host.h vt/vt.h vt/grid.h glyph/glyph.h pty/pty.h config/cfg.h test/*.c tools/*.c bench/*.c fuzz/*.c
 SAN = -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all
 FUZZ_SECONDS ?= 60
@@ -76,9 +76,9 @@ build/obj/%.o: config/%.c $(HDRS)
 	$(CC) $(LIB_FLAGS) -c -o $@ $<
 
 # Filo is its own project with its own gate; built here as it is.
-build/obj/%.o: $(FILO)/%.c $(HDRS)
+build/obj/%.o: $(FILO)/src/%.c $(HDRS)
 	@mkdir -p build/obj
-	$(CC) -O2 -std=c11 -I$(FILO) -mmacosx-version-min=14.0 -c -o $@ $<
+	$(CC) -O2 -std=c11 -I$(FILO)/src -mmacosx-version-min=14.0 -c -o $@ $<
 
 build/obj/utf8.o: $(FILO_TERM)/src/utf8.c $(HDRS)
 	@mkdir -p build/obj
